@@ -1,0 +1,41 @@
+# ── Secrets / security (ห้าม commit เด็ดขาด) ──
+certs/*.key
+certs/*.crt
+certs/*.pem
+certs/mavlink_key*
+certs/mavlink_passphrase*
+certs/*.bak
+*.bak
+*.token
+config.local.yaml
+
+# ── logs / runtime ──
+logs/
+*.log
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+
+# ── Go ──
+# backend/gen/ = generated protobuf — commit ไว้เพื่อให้ clone มา build ได้เลย (ไม่ต้องมี protoc)
+*.exe
+backend/bin/
+
+# ── Python ──
+# frontend gen stubs = commit ไว้เพื่อ run ได้เลย (เหมือนฝั่ง Go)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ── editor / OS ──
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ── added for GitHub backup ──
+*.rar
+.claude/
+launcher_preview.png

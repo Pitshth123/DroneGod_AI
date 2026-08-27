@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package swarmgod.v1;
+
+option go_package = "github.com/swarmgod/backend/gen/swarmgod/v1;swarmgodv1";
+
+// ── สถานะ link/flight ของโดรน (map ตรงกับ badge ใน DroneCard เดิม) ──
+enum LinkStatus {
+  LINK_STATUS_UNSPECIFIED = 0;
+  LINK_STATUS_OFFLINE      = 1;
+  LINK_STATUS_CONNECTING   = 2;
+  LINK_STATUS_RECONNECTING = 3;
+  LINK_STATUS_READY        = 4;   // connected + telemetry verified, disarmed
+  LINK_STATUS_ARMED        = 5;
+  LINK_STATUS_TAKEOFF      = 6;
+  LINK_STATUS_FLYING       = 7;
+  LINK_STATUS_HOLD         = 8;   // loiter
+  LINK_STATUS_MOVING       = 9;
+  LINK_STATUS_LANDING      = 10;
+  LINK_STATUS_RTL          = 11;
+  LINK_STATUS_DISARMED     = 12;
+}
+
+// ── flight mode (ArduCopter) — ตรงกับ Drone.ARDUPILOT_MODES เดิม ──
+enum FlightMode {
+  FLIGHT_MODE_UNKNOWN   = 0;
+  FLIGHT_MODE_STABILIZE = 1;
+  FLIGHT_MODE_ACRO      = 2;
+  FLIGHT_MODE_ALT_HOLD  = 3;
+  FLIGHT_MODE_AUTO      = 4;
+  FLIGHT_MODE_GUIDED    = 5;
+  FLIGHT_MODE_LOITER    = 6;
+  FLIGHT_MODE_RTL       = 7;
+  FLIGHT_MODE_CIRCLE    = 8;
+  FLIGHT_MODE_LAND      = 9;
+  FLIGHT_MODE_POSHOLD   = 10;
+  FLIGHT_MODE_BRAKE     = 11;
+}
+
+// ── GPS fix type (map ตรง GPS_FIX_TYPE ของ MAVLink) ──
+enum GpsFix {
+  GPS_FIX_NONE   = 0;
+  GPS_FIX_NO_FIX = 1;
+  GPS_FIX_2D     = 2;
+  GPS_FIX_3D     = 3;
+  GPS_FIX_DGPS   = 4;
+  GPS_FIX_RTK    = 5;
+}
+
+message GeoPoint {
+  double lat     = 1;  // degrees
+  double lon     = 2;  // degrees
+  double alt_rel = 3;  // meters above home
+  double alt_abs = 4;  // meters AMSL
+}
+
+message Vector3 {
+  double x = 1;  // north / vx
+  double y = 2;  // east  / vy
+  double z = 3;  // down  / vz
+}
+
+// สถานะผลรายลำ (spec §8.3 partial-success taxonomy)
+enum CommandOutcome {
+  OUTCOME_UNKNOWN         = 0;
+  OUTCOME_ACCEPTED        = 1;  // FC ACK accepted (MAV_RESULT_ACCEPTED)
+  OUTCOME_SAFETY_REJECTED = 2;  // core safety envelope ปฏิเสธ
+  OUTCOME_ACK_REJECTED    = 3;  // FC ปฏิเสธ (MAV_RESULT != 0)
+  OUTCOME_TIMEOUT         = 4;  // ไม่ได้ ACK
+  OUTCOME_LINK_LOST       = 5;
+  OUTCOME_NOT_CONNECTED   = 6;  // ไม่มีโดรนนี้
+  OUTCOME_SENT            = 7;  // fire-and-forget ส่งแล้ว (เช่น Goto)
+}
+
+// ── ผลลัพธ์คำสั่งทั่วไป (map จาก MAV_RESULT) ──
+// group command: ระดับบนสุด = สรุป (ok/message) + per_drone = ผลรายลำ (spec §8.3)
+// ห้าม collapse เป็นสรุปอย่างเดียว — ต้องเก็บผลรายลำใน per_drone เสมอ
+message CommandResult {
+  bool   ok          = 1;
+  int32  result_code = 2;   // MAV_RESULT (0=ACCEPTED)
+  string message     = 3;   // human-readable (เช่น เหตุผลที่ safety reject)
+  uint32 drone_id    = 4;
+  string command     = 5;   // ชื่อคำสั่งที่สั่ง
+  repeated CommandResult per_drone = 6;  // ผลรายลำของ group command (§8.3)
+  string request_id  = 7;   // parent request id (§8.2/§16.1)
+  CommandOutcome outcome = 8; // สถานะรายลำแบบ enum (§8.3)
+}

@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package swarmgod.v1;
+
+option go_package = "github.com/swarmgod/backend/gen/swarmgod/v1;swarmgodv1";
+
+// ═══════════════════════════════════════════════════════════
+//  MISSION — run-based mission control
+//  (Real-Flight Safety Fast-Track V2, phase F3 — docs/REAL_FLIGHT_SAFETY_FAST_TRACK_V2.md)
+//
+//  Core-owned run identity + Start/Cancel/Query with idempotency.
+//  ฝั่ง Go ปัจจุบันเป็น SHADOW model (backend/internal/mission): คำนวณ state ได้
+//  แต่ยังไม่ถือ flight authority — Python ยัง execute จริงจน F4 cutover.
+//  ห้าม Mission Engine ยิง flight command เอง (ต้องผ่าน command.Service/safety).
+// ═══════════════════════════════════════════════════════════
+
+enum MissionMode {
+  MISSION_MODE_GROUPED = 0;      // เส้นทางร่วม — advance เมื่อทุกลำถึง
+  MISSION_MODE_SEPARATE = 1;     // เส้นทางรายลำ — advance อิสระ
+  MISSION_MODE_SWARM_LEADER = 2; // Leader path — followers อยู่ใต้ swarm formation loop
+}
+
+enum MissionWpAction {
+  MISSION_WP_ACTION_NONE = 0;
+  MISSION_WP_ACTION_SERVO_A = 1;
+  MISSION_WP_ACTION_SERVO_B = 2;
+}
+
+enum MissionRunState {
+  MISSION_STATE_IDLE = 0;
+  MISSION_STATE_VALIDATING = 1;
+  MISSION_STATE_READY = 2;
+  MISSION_STATE_RUNNING = 3;
+  MISSION_STATE_WAITING = 4;
+  MISSION_STATE_CANCELLING = 5;
+  MISSION_STATE_CANCELLED = 6;
+  MISSION_STATE_INTERRUPTED = 7;
+  MISSION_STATE_FAILED = 8;
+  MISSION_STATE_COMPLETED = 9;
+}
+
+message MissionWaypoint {
+  int32 seq = 1;
+  double lat = 2;
+  double lon = 3;
+  double alt = 4;
+  int32 wait_seconds = 5;         // 0..600 (HOLD/WAIT metadata, แยกจาก action)
+  MissionWpAction action = 6;
+}
+
+message MissionRoute {
+  uint32 drone_id = 1;            // 0 = shared route (GROUPED / SWARM_LEADER)
+  repeated MissionWaypoint points = 2;
+}
+
+message MissionPlan {
+  string plan_id = 1;             // immutable plan identity (client-generated)
+  MissionMode mode = 2;
+  repeated uint32 participants = 3;
+  repeated MissionRoute routes = 4;
+  uint32 leader_id = 5;           // SWARM_LEADER only
+  double arrival_radius_m = 6;    // 0 = default 3.0m (ย้ายจาก map.html TGT_REACH_M)
+  bool rtl_after = 7;
+}
+
+message StartMissionRequest {
+  MissionPlan plan = 1;
+  string operation_id = 2;        // idempotency key ของ Start (retry/double-click/reconnect)
+}
+
+message StartMissionResponse {
+  bool ok = 1;
+  string message = 2;
+  uint64 run_id = 3;              // Core-generated run identity
+  MissionRunState state = 4;
+}
+
+message CancelMissionRequest {
+  uint64 run_id = 1;              // ต้องตรงกับ active run; ไม่ตรง = no-op (stale-safe)
+  string request_id = 2;
+}
+
+message GetMissionStateRequest {} // single active mission ต่อ Core (V2 scope)
+
+message MissionWait {
+  uint32 scope = 1;               // 0 = grouped; อื่น = drone id (SEPARATE)
+  int32 index = 2;
+  double remaining_s = 3;
+  int32 total_s = 4;
+}
+
+message MissionStateResponse {
+  bool active = 1;
+  uint64 run_id = 2;
+  string plan_id = 3;
+  MissionMode mode = 4;
+  MissionRunState state = 5;
+  uint64 revision = 6;            // เพิ่มทุก transition — UI ตรวจว่าเห็น state ล่าสุด
+  repeated uint32 participants = 7;
+  int32 current_index = 8;        // GROUPED / SWARM_LEADER
+  map<uint32, int32> sep_index = 9; // SEPARATE
+  repeated uint32 arrived = 10;
+  repeated MissionWait waits = 11;
+  string last_transition = 12;
+  string terminal_reason = 13;
+}

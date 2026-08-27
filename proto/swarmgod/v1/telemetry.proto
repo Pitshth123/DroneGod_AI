@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package swarmgod.v1;
+
+option go_package = "github.com/swarmgod/backend/gen/swarmgod/v1;swarmgodv1";
+
+import "swarmgod/v1/common.proto";
+
+// ── Telemetry snapshot ต่อโดรน 1 ลำ ──
+// ครบทุก field ที่ GCS_1 เดิมแสดง (drone.py state → DroneCard/overlay/table)
+message Telemetry {
+  uint32     drone_id           = 1;
+  string     name               = 2;
+  LinkStatus status             = 3;
+  FlightMode mode               = 4;
+  bool       armed              = 5;
+
+  GeoPoint   position           = 6;
+  Vector3    velocity           = 7;   // vx, vy, vz (m/s)
+  double     ground_speed       = 8;   // m/s
+  double     heading            = 9;   // deg 0..360
+  double     roll               = 10;  // deg
+  double     pitch              = 11;  // deg
+
+  double     battery_pct        = 12;  // 0..100
+  double     voltage            = 13;  // V
+  double     current            = 14;  // A (ถ้ามี)
+
+  GpsFix     gps_fix            = 15;
+  uint32     sat_count          = 16;
+
+  double     total_distance     = 17;  // m สะสม
+  double     flight_time        = 18;  // s
+  double     connect_elapsed    = 19;  // s (uptime ของ link)
+  bool       telemetry_verified = 20;
+
+  string     host               = 21;  // IP
+  uint32     port               = 22;
+  int64      timestamp_ms       = 23;  // เวลา snapshot (epoch ms)
+
+  // ── Datalink (เพิ่มภายหลัง — เดิม cockpit อ่าน rssi ที่ "ไม่มีอยู่จริง" ใน proto
+  //    เลยได้ 0 ตลอดแล้วคำนวณเป็น LINK 100% ปลอม ๆ) ──
+  int32      rssi               = 24;  // dBm จากวิทยุ SiK (RADIO_STATUS); มีค่าเมื่อ rssi_valid=true
+  bool       rssi_valid         = 25;  // false = ไม่มีวิทยุรายงาน (SITL/USB/UDP ตรง) → UI ต้องโชว์ "N/A"
+  uint32     link_quality       = 26;  // 0..100 คำนวณจริงจากอัตรา heartbeat ที่เข้ามา (ใช้ได้ทุก transport)
+  uint32     drop_rate          = 27;  // ‰ packet drop จาก SYS_STATUS.drop_rate_comm (0 = ไม่มีข้อมูล)
+
+  // ── Servo output จริงจาก FC (SERVO_OUTPUT_RAW) ──
+  // = ค่าที่ FC ส่งออกไปยังขาเซอร์โวจริง (ผลลัพธ์ปลายทาง)
+  uint32     servo_ch7_pwm      = 28;  // ปุ่ม A (0 = FC ยังไม่รายงาน)
+  uint32     servo_ch8_pwm      = 29;  // ปุ่ม B
+  bool       servo_valid        = 30;  // true = มี SERVO_OUTPUT_RAW เข้ามาจริง
+
+  // ── RC input จากรีโมท (RC_CHANNELS) ──
+  // คนละอย่างกับ servo output ด้านบน! นี่คือ "สวิตช์บนรีโมทถูกโยกหรือยัง"
+  // ปุ่ม A = RC7, ปุ่ม B = RC8 — ใช้ตอบคำถาม "ตอนนี้กด A/B มาจากรีโมทหรือยัง"
+  uint32     rc_ch7_raw         = 31;
+  uint32     rc_ch8_raw         = 32;
+  bool       rc_valid           = 33;  // true = มี RC_CHANNELS เข้ามาจริง (รีโมทต่ออยู่)
+
+  // ── core กำลัง override ช่องไหนอยู่ (ใครเป็น "เจ้าของห้อง") ──
+  // ⚠️ ขณะ override ค้างอยู่ rc_chN_raw จะรายงานค่าที่ override ไม่ใช่ตำแหน่งสวิตช์จริง
+  //    (ArduPilot เขียนทับ radio_in) — จึงต้องมีธงนี้แยกไว้ ไม่งั้นแยกไม่ออกว่า
+  //    ค่าที่เห็นมาจาก cockpit หรือจากคนโยกสวิตช์
+  bool       ovr_ch7            = 34;
+  bool       ovr_ch8            = 35;
+}
+
+// ── snapshot ทั้งฝูงในครั้งเดียว ──
+message FleetSnapshot {
+  repeated Telemetry drones       = 1;
+  int64              timestamp_ms = 2;
+}
+
+message SubscribeTelemetryRequest {
+  // ว่าง = subscribe ทุกลำ; ระบุ = เฉพาะลำที่เลือก
+  repeated uint32 drone_ids = 1;
+  // อัตราสูงสุดที่อยากได้ (Hz); 0 = ใช้ default ของ core (~10Hz)
+  uint32 max_hz = 2;
+}
+
+// ── Event / alarm stream (connection loss, low batt, safety reject, audit) ──
+enum EventLevel {
+  EVENT_LEVEL_INFO  = 0;
+  EVENT_LEVEL_OK    = 1;
+  EVENT_LEVEL_WARN  = 2;
+  EVENT_LEVEL_ERROR = 3;
+  EVENT_LEVEL_ALARM = 4;
+}
+
+message Event {
+  EventLevel level        = 1;
+  uint32     drone_id     = 2;   // 0 = ระบบ (ไม่เจาะจงลำ)
+  string     category     = 3;   // "link" | "battery" | "safety" | "command" | "swarm"
+  string     message      = 4;
+  int64      timestamp_ms = 5;
+}

@@ -1,0 +1,4 @@
+# ภาพที่ probe สร้างระหว่างทดสอบ — ไม่ต้อง commit
+shot*.png
+shot*.jpg
+ui-*.png

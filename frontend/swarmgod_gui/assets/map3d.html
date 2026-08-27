@@ -1,0 +1,283 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="application-name" content="map3d"/>
+<title>SwarmGod — 3D</title>
+<style>
+  html,body{height:100%;margin:0;background:#04090b;color:#c8d0d8;
+            font:12px "Segoe UI",sans-serif;overflow:hidden;}
+  #view{position:absolute;inset:0;}
+  #view canvas{display:block;}
+  .card{position:absolute;z-index:10;background:rgba(10,16,20,.92);
+        border:1px solid #232a31;border-radius:9px;padding:7px 10px;}
+  #status{left:10px;top:10px;min-width:150px;}
+  #status .r{display:flex;gap:8px;line-height:1.5;}
+  #status .k{color:#8b96a2;min-width:62px;}
+  #fleet{right:10px;top:10px;width:224px;padding:10px;}
+  #fleet .head{display:flex;align-items:center;justify-content:space-between;
+               margin:0 0 8px;padding:0 1px 7px;border-bottom:1px solid #232a31;}
+  #fleet .head-main{display:flex;align-items:center;gap:7px;}
+  #fleet h2{margin:0;font-size:11px;color:#c8d0d8;letter-spacing:.7px;}
+  #dtoggle{width:22px;height:20px;border:1px solid rgba(255,255,255,.10);
+           border-radius:6px;background:rgba(255,255,255,.04);color:#8b96a2;
+           cursor:pointer;font-size:11px;line-height:16px;padding:0;}
+  #dtoggle:hover{color:#e8edf2;border-color:rgba(56,189,248,.32);}
+  #dcount{min-width:20px;text-align:center;padding:2px 7px;border-radius:9px;
+          background:rgba(56,224,139,.12);color:#38e08b;font:700 10px "IBM Plex Mono",monospace;}
+  #dlist{display:flex;flex-direction:column;gap:5px;max-height:260px;overflow-y:auto;}
+  .d{display:grid;grid-template-columns:10px minmax(0,1fr) auto;align-items:center;
+     gap:8px;padding:7px 8px;background:rgba(255,255,255,.035);
+     border:1px solid rgba(255,255,255,.055);border-radius:7px;cursor:pointer;}
+  .d:hover{background:rgba(255,255,255,.065);border-color:rgba(56,189,248,.22);}
+  .d.selected{background:rgba(56,189,248,.12);border-color:rgba(56,189,248,.48);}
+  .dot{width:9px;height:9px;border-radius:3px;transform:rotate(45deg);}
+  .dmain{min-width:0;display:flex;flex-direction:column;gap:2px;}
+  .dname{font-size:11px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .dmode{color:#8b96a2;font-size:9px;letter-spacing:.35px;white-space:nowrap;
+         overflow:hidden;text-overflow:ellipsis;}
+  .num{font-family:"IBM Plex Mono",monospace;color:#e8edf2;font-size:10px;
+       padding:2px 5px;border-radius:5px;background:rgba(255,255,255,.05);}
+  #hint{left:50%;transform:translateX(-50%);bottom:12px;color:#8b96a2;}
+  #hint b{color:#38e08b;}
+  /* ปุ่มปลดล็อกสั่งบิน — ด่านเดียวกับแผนที่ 2D (ตัวตัดสินจริงอยู่ฝั่ง Python) */
+  #arm{left:10px;bottom:12px;display:flex;align-items:center;gap:8px;
+       cursor:pointer;user-select:none;color:#8b96a2;font-weight:700;
+       letter-spacing:.4px;}
+  #arm svg{width:19px;height:19px;display:block;}
+  #arm.on{background:#38e08b;border-color:#38e08b;color:#0b0f12;}
+  /* ตัวคูณความสูง — ต้องเห็นตลอดว่าภาพเกินจริงกี่เท่า */
+  #exag{right:10px;bottom:12px;display:flex;align-items:center;gap:8px;
+        cursor:pointer;user-select:none;font-weight:700;}
+  #exag .lbl{color:#8b96a2;font-size:10px;letter-spacing:.5px;}
+  #exag .val{color:#eab308;font-family:"IBM Plex Mono",monospace;}
+  .empty{color:#64748b;text-align:center;padding:12px 4px;}
+  #fleet.collapsed{width:auto;min-width:106px;}
+  #fleet.collapsed .head{margin:0;padding:0;border-bottom:none;}
+  #fleet.collapsed #dlist{display:none;}
+  .ok{color:#38e08b;} .warn{color:#eab308;} .bad{color:#ef4444;}
+  @media (max-width:720px){
+    #fleet{width:180px;}
+    #status{max-width:130px;}
+  }
+</style>
+</head>
+<body>
+<div id="view"></div>
+<div class="card" id="status"><div id="lines"></div></div>
+<div class="card" id="fleet">
+  <div class="head">
+    <div class="head-main"><button id="dtoggle" title="พับ/กางรายการโดรน" aria-expanded="true">⌃</button><h2>โดรน</h2></div>
+    <span id="dcount">0</span>
+  </div>
+  <div id="dlist"><div class="empty">รอข้อมูล telemetry…</div></div>
+</div>
+<div class="card" id="hint">ลากเพื่อหมุน · ล้อเลื่อนซูม · <b>ดับเบิลคลิกพื้น = สั่งบินไปจุดนั้น</b></div>
+<div class="card" id="arm" title="ปลดล็อกก่อน แล้วดับเบิลคลิกพื้นเพื่อสั่งบิน">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M7.5 7.5 L16.5 16.5 M16.5 7.5 L7.5 16.5"/>
+    <rect x="9.5" y="9.5" width="5" height="5" rx="1.2"/>
+    <circle cx="6" cy="6" r="2.3"/><circle cx="18" cy="6" r="2.3"/>
+    <circle cx="6" cy="18" r="2.3"/><circle cx="18" cy="18" r="2.3"/>
+  </svg>
+  <span id="armtxt">คลิกเพื่อสั่งบิน</span>
+</div>
+<div class="card" id="exag" title="ขยายความสูงให้เห็นภูมิประเทศชัดขึ้น — คลิกเพื่อเปลี่ยน
+เป็นภาพเกินจริง ห้ามใช้วัดความสูงหรือระยะปลอดภัย">
+  <span class="lbl">ความสูง</span><span class="val" id="exagval">x2.0</span>
+</div>
+
+<!-- ต้องมาก่อน module ข้างล่าง (module ถูก defer อยู่แล้ว แต่วางลำดับให้ชัด
+     เหมือน map.html เดิม จะได้ไม่ต้องเดาว่า QWebChannel พร้อมหรือยัง) -->
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+
+<script type="module">
+// map3d.html — แผนที่ 3D ของ cockpit
+//
+// คุยกับ Python ด้วยวิธีเดียวกับ map.html เดิมทุกอย่าง:
+//   Python -> JS : page.runJavaScript("map3d.setDrones([...])")
+//   JS -> Python : bridge.on_map_event(JSON)  (QWebChannel — ตัวเดียวกับแผนที่ 2D)
+import { createTerrain, droneColor } from "/map3d/terrain.js";
+
+const linesEl = document.getElementById("lines");
+const rows = {};
+function say(k, v, c) {
+  let el = rows[k];
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "r";
+    el.innerHTML = `<span class="k">${k}</span><span class="v"></span>`;
+    linesEl.appendChild(el);
+    rows[k] = el;
+  }
+  const s = el.querySelector(".v");
+  s.textContent = v;
+  s.className = "v " + (c || "");
+}
+
+// ── สะพานฝั่ง Python (QWebChannel) — เหมือน map.html เดิม ──
+let bridge = null;
+if (window.qt && qt.webChannelTransport) {
+  new QWebChannel(qt.webChannelTransport, (ch) => { bridge = ch.objects.bridge; });
+}
+function toPy(obj) {
+  if (bridge) bridge.on_map_event(JSON.stringify(obj));
+  else console.log("#MAP3D# " + JSON.stringify(obj));   // โหมดทดสอบไม่มี bridge
+}
+
+const params = new URLSearchParams(location.search);
+const HOME = {
+  lat: parseFloat(params.get("lat") || "14.9581695"),
+  lon: parseFloat(params.get("lon") || "102.0986187"),
+};
+
+const t = createTerrain({
+  mount: document.getElementById("view"),
+  origin: HOME,
+  zoom: parseInt(params.get("zoom") || "13", 10),
+  radius: parseInt(params.get("radius") || "3", 10),
+  // ปรับได้ผ่าน URL ถ้าเครื่องช้า: seg=48 (หยาบลง เร็วขึ้น ~4 เท่า) · exag=1 (สเกลจริง)
+  segments: parseInt(params.get("seg") || "96", 10),
+  exaggeration: parseFloat(params.get("exag") || "2"),
+  imageryUp: parseInt(params.get("imgup") || "1", 10),
+  onStatus: say,
+  onFps: (f) => say("fps", f.toFixed(0), f >= 30 ? "ok" : f >= 15 ? "warn" : "bad"),
+  onProgress: (s) => say("tiles", `${s.loaded} พร้อม · ${s.pending} กำลังโหลด` +
+                                  (s.failed ? ` · ${s.failed} พลาด` : ""),
+                         s.pending ? "warn" : "ok"),
+});
+window.map3d = t;          // Python เรียกผ่านตัวนี้
+
+// ── Click ground = Waypoint เมื่อเปิด Waypoint Mode ──
+// ปกติคลิกเดี่ยวสงวนไว้ให้หมุนกล้อง แต่เมื่อเปิดโหมดวางจุดต้องส่ง event เดียวกับ 2D
+// และกัน click ครั้งที่สองของ double-click ไม่ให้เพิ่ม waypoint ซ้ำ
+const hintEl = document.getElementById("hint");
+let waypointMode = false;
+t.setWaypointMode = function (on) {
+  waypointMode = !!on;
+  hintEl.innerHTML = waypointMode
+    ? 'WAYPOINT MODE · <b>คลิกพื้นเพื่อวางจุด</b> · ลากเพื่อหมุน · ล้อเลื่อนซูม'
+    : 'ลากเพื่อหมุน · ล้อเลื่อนซูม · <b>ดับเบิลคลิกพื้น = สั่งบินไปจุดนั้น</b>';
+};
+t.renderer.domElement.addEventListener("click", (e) => {
+  if (!waypointMode || e.detail > 1) return;
+  const p = t.pick(e.clientX, e.clientY);
+  if (p) toPy({ event: "waypoint_click", lat: p.lat, lon: p.lon });
+});
+
+// ── ดับเบิลคลิกพื้น = GOTO (เฉพาะเมื่อไม่ได้วาง Waypoint) ──
+// ฝั่ง Python ยังมีด่านปลดล็อก (_goto_armed) กันเผลอสั่งอีกชั้นหนึ่งอยู่แล้ว
+t.renderer.domElement.addEventListener("dblclick", (e) => {
+  if (waypointMode) return;
+  const p = t.pick(e.clientX, e.clientY);
+  if (!p) return;
+  toPy({ event: "map_click", lat: p.lat, lon: p.lon });
+});
+
+// ── พิกัดใต้เมาส์ → แถบ LAT/LNG ใต้แผนที่ (event เดียวกับแผนที่ 2D) ──
+// raycast ทุกครั้งที่เมาส์ขยับแพงเกินไป จึงส่งไม่เกิน ~20 ครั้ง/วิ
+// (แถบพิกัดเป็นแค่ตัวเลขให้คนอ่าน ไม่ต้องตามทุกพิกเซล)
+let _mvAt = 0;
+t.renderer.domElement.addEventListener("mousemove", (e) => {
+  const now = performance.now();
+  if (now - _mvAt < 50) return;
+  _mvAt = now;
+  const p = t.pick(e.clientX, e.clientY);
+  if (p) toPy({ event: "mouse_move", lat: p.lat, lon: p.lon });
+  else toPy({ event: "mouse_out" });
+});
+t.renderer.domElement.addEventListener("mouseleave", () => toPy({ event: "mouse_out" }));
+
+// ── แผงโดรน ──
+const dlist = document.getElementById("dlist");
+const dcount = document.getElementById("dcount");
+const fleetEl = document.getElementById("fleet");
+const toggleEl = document.getElementById("dtoggle");
+let selectedDrones = new Set();
+function refreshDroneSelection() {
+  for (const row of dlist.querySelectorAll(".d")) {
+    row.classList.toggle("selected", selectedDrones.has(Number(row.dataset.droneId)));
+  }
+}
+toggleEl.addEventListener("click", () => {
+  const collapsed = fleetEl.classList.toggle("collapsed");
+  toggleEl.textContent = collapsed ? "⌄" : "⌃";
+  toggleEl.setAttribute("aria-expanded", String(!collapsed));
+});
+const inner = t.setDrones;
+t.setDrones = function (list) {
+  const n = inner(list);
+  dlist.innerHTML = "";
+  dcount.textContent = String((list || []).length);
+  for (const d of list || []) {
+    const c = "#" + droneColor(Number(d.id)).toString(16).padStart(6, "0");
+    const el = document.createElement("div");
+    el.className = "d";
+    el.dataset.droneId = String(d.id);
+    el.title = `เลือกโดรน ${d.id}`;
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.style.background = c;
+    const main = document.createElement("span");
+    main.className = "dmain";
+    const name = document.createElement("span");
+    name.className = "dname";
+    name.style.color = c;
+    name.textContent = d.name || `โดรน ${d.id}`;
+    const mode = document.createElement("span");
+    mode.className = "dmode";
+    mode.textContent = (Number(d.group) ? `กลุ่ม ${d.group} · ` : "") +
+                       (d.mode || "ไม่ทราบโหมด");
+    main.append(name, mode);
+    const alt = document.createElement("span");
+    alt.className = "num";
+    alt.textContent = `${(Number(d.alt) || 0).toFixed(0)} m`;
+    el.append(dot, main, alt);
+    el.addEventListener("click", () => toPy({event: "drone_select", drone_id: Number(d.id)}));
+    dlist.appendChild(el);
+  }
+  if (!list || !list.length) dlist.innerHTML = '<div class="empty">ยังไม่มีโดรน</div>';
+  refreshDroneSelection();
+  return n;
+};
+const innerSelection = t.setSelection;
+t.setSelection = function (ids) {
+  selectedDrones = new Set((ids || []).map(Number));
+  const result = innerSelection(ids);
+  refreshDroneSelection();
+  return result;
+};
+
+// ── ปุ่มโหมดสั่งบิน — ใช้ event เดียวกับแผนที่ 2D ทุกอย่าง ──
+// เป็นโหมดค้าง: เปิดแล้วสั่งได้เรื่อย ๆ จนกดปิดเอง (ไม่ใช่ครั้งเดียวจบ)
+// Python เป็นคนถือสถานะจริง (_goto_armed) หน้านี้แค่สะท้อนให้เห็น
+const armEl = document.getElementById("arm");
+const armTxt = document.getElementById("armtxt");
+let armed = false;
+window.setGotoArmed = function (on) {
+  armed = !!on;
+  armEl.classList.toggle("on", armed);
+  armTxt.textContent = armed ? "โหมดสั่งบิน: เปิด" : "โหมดสั่งบิน: ปิด";
+};
+armEl.addEventListener("click", () => {
+  setGotoArmed(!armed);
+  toPy({ event: "goto_arm", on: armed });
+});
+
+// ── ตัวคูณความสูง — วนค่า ──
+const EXAG = [1, 1.5, 2, 3, 4];
+const exagEl = document.getElementById("exag");
+const exagVal = document.getElementById("exagval");
+function showExag(f) { exagVal.textContent = "x" + f.toFixed(1); }
+showExag(t.getExaggeration());
+exagEl.addEventListener("click", () => {
+  const cur = t.getExaggeration();
+  const i = EXAG.findIndex((v) => Math.abs(v - cur) < 0.01);
+  showExag(t.setExaggeration(EXAG[(i + 1) % EXAG.length]));
+});
+
+toPy({ event: "map3d_ready" });
+</script>
+</body>
+</html>

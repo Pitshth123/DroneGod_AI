@@ -1,0 +1,136 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>SwarmGod — 3D live</title>
+<style>
+  html,body{height:100%;margin:0;background:#04090b;color:#c8d0d8;
+            font:12px "Segoe UI",sans-serif;overflow:hidden;}
+  #view{position:absolute;inset:0;}
+  #hud{position:absolute;left:10px;top:10px;z-index:10;min-width:280px;
+       background:rgba(10,16,20,.92);border:1px solid #232a31;border-radius:8px;
+       padding:10px 12px;line-height:1.5;}
+  #hud h1{margin:0 0 6px;font-size:12px;letter-spacing:.5px;color:#e8edf2;}
+  .row{display:flex;gap:8px;}
+  .k{color:#8b96a2;min-width:96px;}
+  .ok{color:#38e08b;} .bad{color:#ef4444;} .warn{color:#eab308;}
+  #fleet{position:absolute;right:10px;top:10px;z-index:10;min-width:230px;
+         background:rgba(10,16,20,.92);border:1px solid #232a31;border-radius:8px;
+         padding:8px 10px;}
+  #fleet h2{margin:0 0 6px;font-size:11px;color:#8b96a2;letter-spacing:.5px;}
+  .d{display:flex;align-items:center;gap:7px;padding:3px 0;
+     font:600 11px "Segoe UI",sans-serif;}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none;}
+  .num{font-family:"IBM Plex Mono",monospace;color:#e8edf2;}
+  #fps{position:absolute;right:10px;bottom:10px;z-index:10;
+       background:rgba(10,16,20,.92);border:1px solid #232a31;border-radius:8px;
+       padding:6px 10px;font:700 13px "Segoe UI",sans-serif;}
+</style>
+</head>
+<body>
+<div id="view"></div>
+<div id="hud"><h1>SWARMGOD 3D — LIVE</h1><div id="lines"></div></div>
+<div id="fleet"><h2>FLEET</h2><div id="dlist" style="color:#64748b;">รอ telemetry…</div></div>
+<div id="fps">-- fps</div>
+
+<script type="module">
+// live.html — มุมมอง 3D ที่รับตำแหน่งโดรนสดจากฝั่ง Python
+//
+// ฝั่ง Python เรียกผ่าน page.runJavaScript("gcs.setDrones([...])") ซึ่งเป็น pattern
+// เดียวกับที่ cockpit ใช้กับ Leaflet อยู่แล้ว (ดู _js() ใน app.py) — ทิศทางกลับ
+// (JS -> Python) ใช้ console.log แทน QWebChannel เพื่อให้ prototype ไม่ต้องพึ่ง bridge จริง
+import { createTerrainScene, droneColor } from "/scene.js";
+
+const linesEl = document.getElementById("lines");
+function say(k, v, c) {
+  const d = document.createElement("div");
+  d.className = "row";
+  d.innerHTML = `<span class="k">${k}</span><span class="${c || ""}">${v}</span>`;
+  linesEl.appendChild(d);
+  console.log(`#PROBE# ${JSON.stringify({ k, v: String(v), c: c || "" })}`);
+}
+
+const params = new URLSearchParams(location.search);
+const fpsEl = document.getElementById("fps");
+
+createTerrainScene({
+  mount: document.getElementById("view"),
+  aoi: params.get("aoi") || "30",
+  tilesUrl: params.get("tiles"),
+  zoom: parseInt(params.get("zoom") || "11", 10),
+  onStatus: say,
+  onFps: (f) => {
+    fpsEl.textContent = f.toFixed(0) + " fps";
+    fpsEl.style.color = f >= 30 ? "#38e08b" : f >= 15 ? "#eab308" : "#ef4444";
+  },
+}).then((gcs) => {
+  window.gcs = gcs;                       // Python เรียกผ่านตัวนี้
+
+  const dlist = document.getElementById("dlist");
+  let updates = 0, firstFixAt = 0;
+
+  // ห่อ setDrones เพื่อวัดว่า bridge ส่งมาถี่แค่ไหน + อัปเดตแผงขวา
+  const inner = gcs.setDrones;
+  gcs.setDrones = function (list) {
+    const n = inner(list);
+    updates++;
+    if (!firstFixAt && n > 0) {
+      firstFixAt = performance.now();
+      say("หมุดแรกขึ้น", "หลังเปิดหน้า " + (firstFixAt / 1000).toFixed(1) + " s", "ok");
+      // เจอโดรนครั้งแรก → เล็งกล้องไปหาเลย (ครั้งเดียว หลังจากนั้นผู้ใช้หมุนเอง)
+      const d0 = (list || []).find((d) => d.lat || d.lon);
+      if (d0) gcs.focusLonLat(d0.lon, d0.lat, 6000);
+    }
+    dlist.innerHTML = "";
+    for (const d of list || []) {
+      const el = document.createElement("div");
+      el.className = "d";
+      const c = "#" + droneColor(Number(d.id)).toString(16).padStart(6, "0");
+      el.innerHTML =
+        `<span class="dot" style="background:${c}"></span>` +
+        `<span style="color:${c}">UAV_${d.id}</span>` +
+        `<span class="num">${(d.alt ?? 0).toFixed(0)}m</span>` +
+        `<span style="color:#8b96a2">${d.mode || "-"}</span>` +
+        `<span style="color:${d.armed ? "#38e08b" : "#64748b"}">${d.armed ? "ARM" : "safe"}</span>`;
+      dlist.appendChild(el);
+    }
+    if (!list || !list.length) dlist.innerHTML = '<span style="color:#64748b">ไม่มีโดรน</span>';
+    return n;
+  };
+
+  /** Python เรียกเพื่อขอสรุปผลกลับ (ผ่าน console.log ที่ probe ดักอยู่) */
+  window.report = function () {
+    // แยกให้ออกระหว่าง "ไม่ได้วาด" กับ "วาดแล้วแต่ grab() จับภาพ GPU layer ไม่ได้"
+    const tri = gcs.renderer.info.render.triangles;
+    console.log("#PROBE# " + JSON.stringify({
+      k: "สามเหลี่ยมที่วาด", v: (tri / 1000).toFixed(0) + "k ต่อเฟรม",
+      c: tri > 1000 ? "ok" : "bad" }));
+    console.log("#PROBE# " + JSON.stringify({
+      k: "หมุดในฉาก", v: String(gcs.droneCount()),
+      c: gcs.droneCount() > 0 ? "ok" : "warn" }));
+    try {
+      const u = gcs.capture();
+      console.log("#PROBE# " + JSON.stringify({
+        k: "toDataURL", v: `${(u.length / 1024).toFixed(0)} KB · ${u.slice(0, 22)}`,
+        c: u.length > 1000 ? "ok" : "bad" }));
+    } catch (e) {
+      console.log("#PROBE# " + JSON.stringify({ k: "toDataURL", v: e.message, c: "bad" }));
+    }
+    console.log("#PROBE# " + JSON.stringify({
+      k: "อัปเดตที่รับได้", v: String(updates), c: updates > 0 ? "ok" : "bad" }));
+    console.log("#PROBE# " + JSON.stringify({
+      k: "fps ขณะรับสด", v: gcs.stats.fps.toFixed(1),
+      c: gcs.stats.fps >= 30 ? "ok" : gcs.stats.fps >= 15 ? "warn" : "bad" }));
+    console.log("#PROBE-DONE# " + JSON.stringify({
+      verdict: updates > 0 && gcs.stats.fps >= 15 ? "PASS" : "FAIL", results: {} }));
+  };
+
+  say("พร้อมรับ telemetry", "gcs.setDrones() ใช้ได้แล้ว", "ok");
+  console.log("#GCS-READY#");
+}).catch((err) => {
+  say("ฉาก 3D", "ล้มเหลว: " + err.message, "bad");
+  console.log('#PROBE-DONE# {"verdict":"FAIL","results":{}}');
+});
+</script>
+</body>
+</html>

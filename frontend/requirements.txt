@@ -1,0 +1,18 @@
+# SwarmGod cockpit (Python frontend)
+# ติดตั้ง: pip install -r requirements.txt
+
+# ── GUI ──
+PyQt5>=5.15.0
+PyQtWebEngine>=5.15.0        # Leaflet map ใน QWebEngine
+
+# ── gRPC (คุยกับ Go core) ──
+grpcio>=1.83.0,<2
+grpcio-tools>=1.83.0,<2      # gen Python stubs จาก proto
+protobuf>=7.35.1,<8          # ต้องตรงกับ generated *_pb2.py (protoc 7.35.1)
+
+# ── Computer Vision & Video (คงจาก GCS_1) ──
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# ── 3D formation viz ──
+matplotlib>=3.7.0

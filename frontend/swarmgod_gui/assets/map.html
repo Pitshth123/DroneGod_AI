@@ -1,0 +1,1014 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<link rel="stylesheet" href="/leaflet/leaflet.css"/>
+<style>
+  html,body,#map{height:100%;margin:0;background:#04090b;}
+  .leaflet-container{background:#04090b;}
+  .drone-ico{filter:drop-shadow(0 0 4px #000);}
+  /* tooltip ตอนชี้โดรน — พื้นขาว ตัวหนังสือดำ อ่านง่ายบนภาพดาวเทียม */
+  .dlabel,
+  .leaflet-tooltip.dlabel{
+    color:#101418 !important;
+    background:#ffffff !important;
+    border:1px solid rgba(0,0,0,.35) !important;
+    border-radius:6px !important;
+    box-shadow:0 2px 8px rgba(0,0,0,.45) !important;
+    font:600 11px "Segoe UI",sans-serif !important;
+    text-shadow:none !important;
+    white-space:nowrap;
+    padding:5px 8px !important;
+    opacity:1 !important;
+    /* tooltip ต้องไม่รับเมาส์เอง มิฉะนั้น Leaflet อาจมองว่ายัง hover แล้วค้าง */
+    pointer-events:none !important;
+  }
+  .dlabel b{ color:#000; }
+  /* ลูกศรชี้ของ tooltip ให้เป็นสีขาวตาม */
+  .leaflet-tooltip-top.dlabel:before{ border-top-color:#ffffff !important; }
+  .leaflet-tooltip-bottom.dlabel:before{ border-bottom-color:#ffffff !important; }
+  .leaflet-tooltip-left.dlabel:before{ border-left-color:#ffffff !important; }
+  .leaflet-tooltip-right.dlabel:before{ border-right-color:#ffffff !important; }
+
+  /* โล่ง — เหลือแค่ Layers + Zoom */
+  .leaflet-control-attribution{display:none!important;}
+  .leaflet-control-layers,
+  .leaflet-bar{
+    background:rgba(10,16,20,.92)!important;
+    border:1px solid #232a31!important;
+    border-radius:8px!important;
+    box-shadow:none!important;
+    color:#c8d0d8;
+  }
+  .leaflet-bar a{
+    background:transparent!important;
+    color:#e8edf2!important;
+    border-bottom:1px solid #232a31!important;
+    width:32px;height:32px;line-height:32px;font-size:16px;
+  }
+  .leaflet-bar a:last-child{border-bottom:none!important;}
+  .leaflet-bar a:hover{background:rgba(255,255,255,.08)!important;}
+  .leaflet-control-layers{
+    padding:0!important;
+  }
+  .leaflet-control-layers-toggle{
+    width:34px!important;height:34px!important;
+    background-size:18px 18px!important;
+    background-color:transparent!important;
+    border-radius:8px!important;
+  }
+  .leaflet-control-layers-expanded{
+    padding:8px 10px!important;
+    min-width:140px;
+    background:rgba(10,16,20,.96)!important;
+    color:#e8edf2!important;
+  }
+  .leaflet-control-layers label{
+    color:#c8d0d8!important;
+    font:600 11px "Segoe UI",sans-serif!important;
+    margin:3px 0!important;
+  }
+  .leaflet-control-layers-separator{
+    border-top:1px solid #232a31!important;
+    margin:6px -10px!important;
+  }
+
+  /* ── ปุ่มปลดล็อกสั่งบิน (Click-to-Fly arm) ──────────────────
+     ค่าเริ่มต้น = ล็อก. คลิกแผนที่เฉย ๆ จะไม่สั่งโดรนบิน ต้องกดปุ่มนี้ก่อน
+     กันเคสเผลอคลิกแผนที่ (เลื่อน/ซูม/ชี้พิกัด) แล้วโดรนออกบินทันที
+     ปลดล็อกแล้วใช้ได้ครั้งเดียว — สั่งไปแล้วกลับมาล็อกเอง */
+  #goto-arm{
+    position:absolute; left:12px; bottom:22px; z-index:1000;
+    display:flex; align-items:center; gap:8px;
+    padding:8px 12px 8px 9px;
+    background:rgba(10,16,20,.92);
+    border:1px solid #232a31; border-radius:10px;
+    color:#8b96a2; cursor:pointer; user-select:none;
+    font:700 11px "Segoe UI",sans-serif; letter-spacing:.4px;
+    transition:color .12s, border-color .12s, background .12s;
+  }
+  #goto-arm:hover{ background:rgba(18,26,32,.96); color:#c8d0d8; }
+  #goto-arm svg{ width:20px; height:20px; display:block; }
+  #goto-arm .ga-txt{ white-space:nowrap; }
+  /* ปลดล็อกแล้ว — เขียวเรืองพร้อมกะพริบ ให้เห็นชัดว่า "คลิกแล้วบินจริง" */
+  #goto-arm.armed{
+    color:#0b0f12; border-color:#38e08b;
+    background:#38e08b; animation:gaPulse 1.15s ease-in-out infinite;
+  }
+  @keyframes gaPulse{
+    0%,100%{ box-shadow:0 0 0 0 rgba(56,224,139,.55); }
+    50%    { box-shadow:0 0 0 7px rgba(56,224,139,0); }
+  }
+  /* ซ่อนตอนโหมด Waypoint/วาด — คลิกตอนนั้นไม่ใช่คำสั่งบินอยู่แล้ว */
+  #goto-arm.hidden{ display:none; }
+
+  /* ── เป้าหมายกะพริบ (Blinking Target) ── */
+  @keyframes tgtPulse{
+    0%,100%{ opacity:1;   transform:scale(1); }
+    50%    { opacity:.28; transform:scale(1.28); }
+  }
+  .tgt-ico{ pointer-events:none; }
+  .tgt-ico svg{ animation:tgtPulse 1.05s ease-in-out infinite; transform-origin:50% 50%; }
+
+  /* ── ป้ายข้อความบนแผนที่ยุทธวิธี ── */
+  .tac-text{
+    color:#fff; font:700 12px "Segoe UI",sans-serif;
+    text-shadow:0 0 4px #000,0 0 2px #000; white-space:nowrap;
+    background:rgba(10,16,20,.55); border:1px solid rgba(255,255,255,.25);
+    border-radius:4px; padding:2px 6px;
+  }
+  .tac-icon{ filter:drop-shadow(0 0 3px #000); }
+
+  /* ── Waypoint markers (Route Planning) ── */
+  .wp-marker{ pointer-events:auto; cursor:context-menu; }
+  .wp-dot{
+    width:100%; height:100%; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    color:#fff; font:800 11px "Segoe UI",sans-serif;
+    border:2px solid #04090b; box-shadow:0 0 4px rgba(0,0,0,.6);
+  }
+  @keyframes wpPulse{
+    0%,100%{ opacity:1; transform:scale(1); }
+    50%    { opacity:.35; transform:scale(1.35); }
+  }
+  .wp-active .wp-dot{ animation:wpPulse 0.9s ease-in-out infinite; }
+  .wp-done .wp-dot{ opacity:.35; filter:grayscale(60%); }
+  .wp-dot.wp-servo-a{ background:#ef4444 !important; box-shadow:0 0 8px rgba(239,68,68,.9); }
+  .wp-dot.wp-servo-b{ background:#eab308 !important; color:#101418; box-shadow:0 0 8px rgba(234,179,8,.9); }
+  .wp-action{font-size:8px;margin-left:1px;}
+  /* WAIT badge — ป้ายเวลาหยุดรอ ลอยเหนือหมุด (แยกจาก action A/B) */
+  .wp-wait{
+    position:absolute; top:-9px; left:50%; transform:translateX(-50%);
+    background:#0891b2; color:#e0f7ff; font:800 8px "Segoe UI",sans-serif;
+    padding:1px 3px; border-radius:5px; border:1px solid #04090b;
+    white-space:nowrap; box-shadow:0 0 4px rgba(8,145,178,.8); pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<!-- ปุ่มปลดล็อกสั่งบิน — ต้องกดก่อนถึงคลิกแผนที่สั่ง GOTO ได้ (ดู setGotoArmed) -->
+<div id="goto-arm" title="ปลดล็อกก่อน แล้วคลิกแผนที่เพื่อสั่งโดรนบินไปจุดนั้น">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <!-- โดรน 4 ใบพัด: แขนทแยง + มอเตอร์ 4 มุม + ตัวถังกลาง -->
+    <path d="M7.5 7.5 L16.5 16.5 M16.5 7.5 L7.5 16.5"/>
+    <rect x="9.5" y="9.5" width="5" height="5" rx="1.2"/>
+    <circle cx="6" cy="6" r="2.3"/><circle cx="18" cy="6" r="2.3"/>
+    <circle cx="6" cy="18" r="2.3"/><circle cx="18" cy="18" r="2.3"/>
+  </svg>
+  <span class="ga-txt">คลิกเพื่อสั่งบิน</span>
+</div>
+
+<script src="/leaflet/leaflet.js"></script>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script>
+var map, drones = {}, trails = {}, droneColors = {}, gcsMarker = null, bridge = null;
+var droneInfo = {};   // id -> HTML ที่จะโชว์ใน tooltip ตอน hover (ไม่ค้างบนแผนที่)
+var _lastMouseSend = 0;   // throttle การส่งพิกัดเมาส์ไป Python
+var GCS = [14.9581695, 102.0986187];
+var leaderId = 0, leaderRing = null, selectRing = null;
+var drawTool = 'none';
+var fencePts = [], fenceTmp = null, fenceLayer = null;
+var rectStart = null, circleCenter = null;
+var baseName = 'Satellite';
+
+function setLeaderId(id){
+  if(id !== leaderId){
+    leaderId = id;
+    if(leaderRing){ map.removeLayer(leaderRing); leaderRing = null; }
+  }
+}
+
+// ── เป้าหมาย + เส้นประนำทาง (ต่อโดรน 1 ลำ) ──
+var targets = {};        // id -> {marker, line, lat, lon, color}
+const TGT_REACH_M = 3.0; // เข้าใกล้เท่านี้ = ถึงเป้า → ล้างเป้าอัตโนมัติ
+
+// ── ชั้นวาดแผนที่ยุทธวิธี (แยกจาก geofence โดยสิ้นเชิง) ──
+var tacLayer = null;         // L.featureGroup เก็บทุกอย่างที่วาด
+var tacTool = 'none';        // none|line|circle|polygon|text|icon|erase
+var tacPts = [];             // จุดที่กำลังวาดค้างอยู่
+var tacTmp = null;           // เส้น/รูป preview ระหว่างวาด
+var tacIcons = {};           // name -> dataURL (สัญลักษณ์ที่ผู้ใช้อัปโหลด)
+var tacActiveIcon = null;    // สัญลักษณ์ที่เลือกไว้จะวางลำดับถัดไป
+var tacPendingText = '';     // ข้อความที่รอวาง
+var tacUndo = [];            // stack ของ layer ที่วาดไว้ (สำหรับ undo)
+
+// ── Waypoint Route Planning ──
+var waypointMode = false;
+// gotoArmed = ปลดล็อก "คลิกแผนที่แล้วสั่งบิน" แล้วหรือยัง (ค่าเริ่มต้น: ล็อกไว้)
+// ตัวตัดสินจริงอยู่ฝั่ง Python (_on_map_click) — ตัวแปรนี้คุมแค่หน้าตาปุ่ม/เคอร์เซอร์
+var gotoArmed = false;
+var waypoints = {};      // droneId -> [{idx, lat, lon, marker, color}]
+var waypointLines = {};  // droneId -> L.polyline (เส้นประเชื่อมจุดตามลำดับ)
+
+var swarmLinks = [];
+var lastSwarmEdges = [];
+function setSwarmEdges(js){
+  try { lastSwarmEdges = JSON.parse(js || '[]'); } catch(e){ lastSwarmEdges = []; }
+  _redrawSwarmLinks();
+}
+function clearSwarmEdges(){ setSwarmEdges('[]'); }
+function _redrawSwarmLinks(){
+  swarmLinks.forEach(function(l){ map.removeLayer(l); });
+  swarmLinks = [];
+  if(!lastSwarmEdges.length) return;
+  lastSwarmEdges.forEach(function(e){
+    var a = drones[e.leader], b = drones[e.follower];
+    if(!a || !b) return;
+    var line = L.polyline([a.getLatLng(), b.getLatLng()], {
+      color:'#f59e0b', weight:2, opacity:0.75, dashArray:'6 4'
+    }).addTo(map);
+    swarmLinks.push(line);
+  });
+}
+
+function setDrawTool(tool){
+  drawTool = tool || 'none';
+  fencePts = [];
+  rectStart = null;
+  circleCenter = null;
+  if(fenceTmp){ map.removeLayer(fenceTmp); fenceTmp = null; }
+  // เปิด geofence → ปิดเครื่องมือยุทธวิธี (คนละระบบ ใช้พร้อมกันไม่ได้)
+  // หมายเหตุ: waypointMode ปิดจากฝั่ง Python เสมอ (single source of truth
+  // ของสถานะสวิตช์ UI) — ดู _set_draw_tool / _set_tac_tool ใน app.py
+  if(drawTool !== 'none' && tacTool !== 'none'){
+    tacTool = 'none'; tacPts = [];
+    if(tacTmp){ map.removeLayer(tacTmp); tacTmp = null; }
+    if(map) map.doubleClickZoom.enable();
+  }
+  _gotoArmSync();
+}
+function setFenceMode(on){ setDrawTool(on ? 'poly' : 'none'); }
+function getFencePoints(){ return JSON.stringify(fencePts); }
+
+function drawFence(js){
+  var pts = JSON.parse(js);
+  if(fenceLayer){ map.removeLayer(fenceLayer); fenceLayer = null; }
+  if(fenceTmp){ map.removeLayer(fenceTmp); fenceTmp = null; }
+  if(pts.length >= 3){
+    fenceLayer = L.polygon(pts.map(function(p){return [p.lat,p.lon];}),
+      {color:'#ef4444', weight:2, fillOpacity:0.08}).addTo(map);
+  }
+}
+
+function _circleToPolygon(cLat, cLon, rM, n){
+  n = n || 48;
+  var pts = [], R = 6371000;
+  var lat1 = cLat * Math.PI/180;
+  var lon1 = cLon * Math.PI/180;
+  for(var i=0;i<n;i++){
+    var brng = (2*Math.PI*i)/n;
+    var lat2 = Math.asin(Math.sin(lat1)*Math.cos(rM/R) + Math.cos(lat1)*Math.sin(rM/R)*Math.cos(brng));
+    var lon2 = lon1 + Math.atan2(Math.sin(brng)*Math.sin(rM/R)*Math.cos(lat1),
+                                 Math.cos(rM/R)-Math.sin(lat1)*Math.sin(lat2));
+    pts.push({lat: lat2*180/Math.PI, lon: lon2*180/Math.PI});
+  }
+  return pts;
+}
+
+function _haversine(a, b){
+  var R=6371000, toR=Math.PI/180;
+  var dLat=(b.lat-a.lat)*toR, dLon=(b.lon-a.lon)*toR;
+  var la1=a.lat*toR, la2=b.lat*toR;
+  var h=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)*Math.sin(dLon/2);
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+
+function _preview(pts){
+  if(fenceTmp) map.removeLayer(fenceTmp);
+  if(!pts || pts.length < 2){ fenceTmp = null; return; }
+  fenceTmp = L.polygon(pts.map(function(p){return [p.lat,p.lon];}),
+    {color:'#3b82f6', weight:1.5, dashArray:'4', fillOpacity:0.06}).addTo(map);
+}
+
+function _tl(layer, opts){
+  opts = opts || {};
+  return L.tileLayer('/tile/'+layer+'/{z}/{x}/{y}.png', {
+    maxZoom: opts.maxZoom || 19,
+    opacity: opts.opacity == null ? 1 : opts.opacity,
+    attribution: ''
+  });
+}
+
+function initMap(){
+  var sat = _tl('sat');
+  var satH = _tl('sat');
+  var labels = _tl('labels');
+  var hybrid = L.layerGroup([satH, labels]);
+  var streets = _tl('streets');
+  var road = _tl('road');
+  var topo = _tl('topo');
+  var terrain = _tl('terrain', {maxZoom: 13});
+  var otm = _tl('otm', {maxZoom: 17});
+  var dark = _tl('dark');
+  var light = _tl('light');
+  var gray = _tl('gray');
+
+  map = L.map('map', {
+    center: GCS,
+    zoom: 17,
+    layers: [sat],
+    zoomControl: false,
+    attributionControl: false
+  });
+
+  L.control.zoom({position: 'bottomright'}).addTo(map);
+  L.control.layers({
+    'Satellite': sat,
+    'Hybrid': hybrid,
+    'Streets': streets,
+    'Road (OSM)': road,
+    'Topo': topo,
+    'Terrain': terrain,
+    'OpenTopo': otm,
+    'Dark': dark,
+    'Light': light,
+    'Gray': gray
+  }, {}, {
+    position: 'topright',
+    collapsed: true
+  }).addTo(map);
+
+  map.on('baselayerchange', function(e){ baseName = e.name; });
+
+  map.on('click', function(e){
+    var ll = {lat:e.latlng.lat, lon:e.latlng.lng};
+    // Waypoint mode มาก่อนทุกอย่าง — คลิกแล้ววางจุด ไม่ใช่สั่งบินทันที
+    if(waypointMode){
+      if(bridge) bridge.on_map_event(JSON.stringify(
+        {event:'waypoint_click', lat:e.latlng.lat, lon:e.latlng.lng}));
+      return;
+    }
+    // เครื่องมือวาดยุทธวิธีมาก่อน — ไม่ให้กลายเป็นคำสั่ง GOTO
+    if(tacTool !== 'none'){ _tacClick(ll); return; }
+    if(drawTool === 'poly'){
+      fencePts.push(ll);
+      _preview(fencePts);
+      return;
+    }
+    if(drawTool === 'rect'){
+      if(!rectStart){ rectStart = ll; return; }
+      var a = rectStart, b = ll;
+      fencePts = [
+        {lat:a.lat, lon:a.lon}, {lat:a.lat, lon:b.lon},
+        {lat:b.lat, lon:b.lon}, {lat:b.lat, lon:a.lon}
+      ];
+      _preview(fencePts);
+      rectStart = null;
+      return;
+    }
+    if(drawTool === 'circle'){
+      if(!circleCenter){ circleCenter = ll; return; }
+      var r = _haversine(circleCenter, ll);
+      if(r < 2) r = 2;
+      fencePts = _circleToPolygon(circleCenter.lat, circleCenter.lon, r, 48);
+      _preview(fencePts);
+      circleCenter = null;
+      return;
+    }
+    if(bridge) bridge.on_map_event(JSON.stringify(
+      {event:'map_click', lat:e.latlng.lat, lon:e.latlng.lng}));
+  });
+  // ดับเบิลคลิก = จบเส้น/รูปหลายเหลี่ยมที่วาดค้างอยู่
+  map.on('dblclick', function(e){
+    if(tacTool === 'line' || tacTool === 'polygon'){
+      finishTactical();
+      L.DomEvent.stop(e);
+    }
+  });
+
+  // ส่งพิกัดเมาส์ให้ Python ไปโชว์ "นอกกรอบแผนที่" (throttle ~25 ครั้ง/วินาที)
+  map.on('mousemove', function(e){
+    var now = Date.now();
+    if(bridge && now - _lastMouseSend > 40){
+      _lastMouseSend = now;
+      bridge.on_map_event(JSON.stringify(
+        {event:'mouse_move', lat:e.latlng.lat, lon:e.latlng.lng}));
+    }
+  });
+  map.on('mouseout', function(){
+    // ออกจากพื้นที่แผนที่แล้วซ่อนทุก tooltip ทันที แม้ event ของ marker จะไม่ถูกส่ง
+    Object.keys(drones).forEach(function(id){ drones[id].closeTooltip(); });
+    if(gcsMarker) gcsMarker.closeTooltip();
+    if(bridge) bridge.on_map_event(JSON.stringify({event:'mouse_out'}));
+  });
+
+  map.on('mousemove', function(e){
+    var ll = {lat:e.latlng.lat, lon:e.latlng.lng};
+    // preview ระหว่างวาดยุทธวิธี
+    if(tacTool === 'line' || tacTool === 'polygon'){
+      if(tacPts.length) _tacPreview(tacTool, tacPts.concat([ll]));
+      return;
+    }
+    if(tacTool === 'circle' && tacPts.length){
+      var rr = _haversine(tacPts[0], ll);
+      if(tacTmp){ map.removeLayer(tacTmp); tacTmp = null; }
+      if(rr >= 1){
+        tacTmp = L.circle([tacPts[0].lat, tacPts[0].lon], {
+          radius:rr, color:TAC_COLOR, weight:1.5, dashArray:'4',
+          fillOpacity:0.05}).addTo(map);
+      }
+      return;
+    }
+    if(drawTool === 'rect' && rectStart){
+      var a = rectStart, b = ll;
+      _preview([
+        {lat:a.lat, lon:a.lon}, {lat:a.lat, lon:b.lon},
+        {lat:b.lat, lon:b.lon}, {lat:b.lat, lon:a.lon}
+      ]);
+    } else if(drawTool === 'circle' && circleCenter){
+      var r = _haversine(circleCenter, ll);
+      if(r >= 2) _preview(_circleToPolygon(circleCenter.lat, circleCenter.lon, r, 48));
+    } else if(drawTool === 'poly' && fencePts.length){
+      _preview(fencePts.concat([ll]));
+    }
+  });
+  setGCS(GCS[0], GCS[1]);
+}
+
+function _arrow(color, hdg, selected){
+  var glow = selected ? 'filter:drop-shadow(0 0 6px '+color+');' : '';
+  var s = '<svg width="30" height="30" viewBox="0 0 30 30" style="transform:rotate('+hdg+'deg);'+glow+'">'
+    + '<g stroke="'+color+'" stroke-width="2" stroke-linecap="round">'
+    +   '<line x1="9" y1="9" x2="21" y2="21"/><line x1="21" y1="9" x2="9" y2="21"/>'
+    + '</g>'
+    + '<g fill="'+color+'" fill-opacity="0.28" stroke="'+color+'" stroke-width="1.3">'
+    +   '<circle cx="9" cy="9" r="4.3"/><circle cx="21" cy="9" r="4.3"/>'
+    +   '<circle cx="9" cy="21" r="4.3"/><circle cx="21" cy="21" r="4.3"/>'
+    + '</g>'
+    + '<rect x="11.5" y="11.5" width="7" height="7" rx="1.5" fill="'+color+'" stroke="#04090b" stroke-width="1"/>'
+    + '<polygon points="15,0.5 18,6 12,6" fill="'+color+'" stroke="#04090b" stroke-width="0.5"/>'
+    + '</svg>';
+  return L.divIcon({className:'drone-ico', iconSize:[30,30], iconAnchor:[15,15], html:s});
+}
+
+var selectedId = 0;
+function updateDrone(id, lat, lon, hdg, color, name){
+  var ll = [lat, lon];
+  droneColors[id] = color;
+  var sel = (id === selectedId);
+  if(!drones[id]){
+    // ป้ายชื่อ "ไม่" ค้างบนแผนที่ (permanent:false) — โชว์เฉพาะตอนเอาเมาส์ไปชี้
+    // แผนที่จึงเห็นแค่จุดสีของแต่ละลำ ไม่รก
+    drones[id] = L.marker(ll, {icon:_arrow(color,hdg,sel)}).addTo(map)
+      .bindTooltip(name, {permanent:false, sticky:false, direction:'top',
+                          className:'dlabel', offset:[0,-12], opacity:1});
+    // เมาส์ออก → ปิด tooltip ทันที ไม่ค้าง
+    drones[id].on('mouseout', function(){ this.closeTooltip(); });
+    trails[id] = L.polyline([ll], {color:color, weight:2, opacity:0.7}).addTo(map);
+  } else {
+    drones[id].setLatLng(ll).setIcon(_arrow(color,hdg,sel));
+    // อัปเดตเนื้อหา tooltip (ไม่เปิด tooltip ถ้าเมาส์ไม่ได้ชี้อยู่)
+    if(droneInfo[id] && drones[id].getTooltip()){
+      drones[id].getTooltip().setContent(droneInfo[id]);
+    }
+    var pts = trails[id].getLatLngs();
+    var last = pts[pts.length-1];
+    if(!last || Math.abs(last.lat-lat)>1e-6 || Math.abs(last.lng-lon)>1e-6){
+      trails[id].addLatLng(ll);
+      if(pts.length > 500) trails[id].setLatLngs(pts.slice(-500));
+    }
+  }
+  if(id === leaderId){
+    if(!leaderRing){
+      leaderRing = L.circleMarker(ll, {radius:15, color:'#ffb000', weight:3, fillOpacity:0}).addTo(map);
+    } else {
+      leaderRing.setLatLng(ll);
+    }
+  }
+  if(sel){
+    if(!selectRing){
+      selectRing = L.circleMarker(ll, {
+        radius:20, color:color, weight:2, fillColor:color, fillOpacity:0.14
+      }).addTo(map);
+    } else {
+      selectRing.setLatLng(ll);
+      selectRing.setStyle({color:color, fillColor:color});
+    }
+  }
+  // เส้นประไปเป้าหมายหดสั้นลงตามตำแหน่งจริง (real-time)
+  if(targets[id]) _updateTargetLine(id);
+  if(lastSwarmEdges && lastSwarmEdges.length) _redrawSwarmLinks();
+}
+
+function clearDrone(id){
+  if(drones[id]){ map.removeLayer(drones[id]); delete drones[id]; }
+  if(trails[id]){ map.removeLayer(trails[id]); delete trails[id]; }
+  clearTarget(id);
+  delete droneColors[id];
+  delete droneInfo[id];
+}
+
+// ══════════════════════════════════════════════════════════
+//  เป้าหมายกะพริบ + เส้นประนำทาง
+//  (เส้น "ทึบ" ที่ลากตามหลังโดรน = trails[] คงไว้เหมือนเดิม ไม่ยุ่ง)
+// ══════════════════════════════════════════════════════════
+function _targetIcon(color){
+  // เป้าเล็ง: วงนอก + กากบาท + จุดกลาง — กะพริบด้วย CSS (.tgt-ico svg)
+  var s = '<svg width="34" height="34" viewBox="0 0 34 34">'
+    + '<circle cx="17" cy="17" r="11" fill="none" stroke="'+color+'" stroke-width="2.2"/>'
+    + '<circle cx="17" cy="17" r="3.4" fill="'+color+'"/>'
+    + '<g stroke="'+color+'" stroke-width="2" stroke-linecap="round">'
+    +   '<line x1="17" y1="1.5" x2="17" y2="7"/><line x1="17" y1="27" x2="17" y2="32.5"/>'
+    +   '<line x1="1.5" y1="17" x2="7" y2="17"/><line x1="27" y1="17" x2="32.5" y2="17"/>'
+    + '</g></svg>';
+  return L.divIcon({className:'tgt-ico', iconSize:[34,34], iconAnchor:[17,17], html:s});
+}
+
+// ตั้งเป้าหมายให้โดรน 1 ลำ — สีตามสีโดรน
+function setTarget(id, lat, lon, color){
+  color = color || droneColors[id] || '#20c77a';
+  clearTarget(id);
+  var marker = L.marker([lat, lon], {icon:_targetIcon(color), interactive:false}).addTo(map);
+  var from = drones[id] ? drones[id].getLatLng() : L.latLng(lat, lon);
+  var line = L.polyline([from, [lat, lon]], {
+    color: color, weight: 2.2, opacity: 0.9,
+    dashArray: '8 7', lineCap: 'round', interactive: false
+  }).addTo(map);
+  targets[id] = {marker:marker, line:line, lat:lat, lon:lon, color:color};
+  _updateTargetLine(id);
+}
+
+function clearTarget(id){
+  var t = targets[id];
+  if(!t) return;
+  if(t.marker) map.removeLayer(t.marker);
+  if(t.line) map.removeLayer(t.line);
+  delete targets[id];
+}
+
+function clearAllTargets(){
+  for(var id in targets) clearTarget(id);
+}
+
+function hasTarget(id){ return !!targets[id]; }
+function targetCount(){ return Object.keys(targets).length; }
+
+// เส้นประหดสั้นลงตามระยะจริง — เรียกทุกครั้งที่โดรนขยับ
+function _updateTargetLine(id){
+  var t = targets[id];
+  if(!t || !drones[id]) return;
+  var p = drones[id].getLatLng();
+  t.line.setLatLngs([p, [t.lat, t.lon]]);
+  var d = _haversine({lat:p.lat, lon:p.lng}, {lat:t.lat, lon:t.lon});
+  if(d <= TGT_REACH_M){          // ถึงเป้าแล้ว → เก็บเป้าออกเอง
+    clearTarget(id);
+    if(bridge) bridge.on_map_event(JSON.stringify(
+      {event:'target_reached', drone_id:parseInt(id,10)}));
+  }
+}
+
+// ตั้งเนื้อหา tooltip ของโดรน (โชว์เฉพาะตอน hover) — เรียกจาก Python พร้อม telemetry
+function setDroneInfo(id, html){
+  droneInfo[id] = html;
+  if(drones[id]) drones[id].setTooltipContent(html);
+}
+
+function jumpTo(lat, lon, zoom){
+  if(!map) return;
+  var z = (zoom == null || zoom === undefined) ? map.getZoom() : zoom;
+  map.setView([lat, lon], z);
+}
+
+function setGCS(lat, lon){
+  GCS = [lat, lon];
+  if(gcsMarker) map.removeLayer(gcsMarker);
+  gcsMarker = L.marker([lat,lon], {icon:L.divIcon({className:'drone-ico', iconSize:[18,18],
+    iconAnchor:[9,9], html:'<svg width="18" height="18"><polygon points="9,1 17,9 9,17 1,9" '+
+    'fill="none" stroke="#22d3ee" stroke-width="2"/></svg>'})})
+    .addTo(map).bindTooltip('GCS / Home', {permanent:false, sticky:false,
+      direction:'top', className:'dlabel', offset:[0,-10]});
+  gcsMarker.on('mouseout', function(){ this.closeTooltip(); });
+}
+
+function focusDrone(id){
+  selectedId = id;
+  if(drones[id]){
+    map.panTo(drones[id].getLatLng());
+    var c = droneColors[id] || '#20c77a';
+    var ll = drones[id].getLatLng();
+    drones[id].setIcon(_arrow(c, 0, true));
+    if(selectRing) map.removeLayer(selectRing);
+    selectRing = L.circleMarker(ll, {
+      radius:20, color:c, weight:2, fillColor:c, fillOpacity:0.16
+    }).addTo(map);
+  }
+}
+// ══════════════════════════════════════════════════════════
+//  WAYPOINT ROUTE PLANNING — พล็อตจุด + เส้นประนำทางล่วงหน้า
+//  (คนละระบบกับ Tactical/Geofence — เปิดได้ทีละระบบ)
+// ══════════════════════════════════════════════════════════
+function setWaypointMode(on){
+  waypointMode = !!on;
+  if(waypointMode){
+    // กันชนกับเครื่องมือวาดอื่น ๆ — เปิดได้ทีละระบบ (เหมือน tactical<->geofence)
+    if(tacTool !== 'none'){
+      tacTool = 'none'; tacPts = [];
+      if(tacTmp){ map.removeLayer(tacTmp); tacTmp = null; }
+    }
+    if(drawTool !== 'none'){
+      drawTool = 'none'; fencePts = []; rectStart = null; circleCenter = null;
+      if(fenceTmp){ map.removeLayer(fenceTmp); fenceTmp = null; }
+    }
+    map.doubleClickZoom.disable();
+    map.getContainer().style.cursor = 'crosshair';
+  } else {
+    map.doubleClickZoom.enable();
+    map.getContainer().style.cursor = '';
+  }
+  _gotoArmSync();
+}
+
+// ══════════════════════════════════════════════════════════
+//  CLICK-TO-FLY ARM — ปลดล็อกก่อนถึงคลิกแผนที่สั่งบินได้
+//  Python เป็นคนตัดสินจริง (_on_map_click) — ที่นี่คุมแค่ UI + แจ้ง state กลับ
+// ══════════════════════════════════════════════════════════
+function setGotoArmed(on){
+  gotoArmed = !!on;
+  var el = document.getElementById('goto-arm');
+  if(el){
+    el.classList.toggle('armed', gotoArmed);
+    el.querySelector('.ga-txt').textContent =
+      gotoArmed ? 'พร้อมสั่งบิน — คลิกจุดบนแผนที่' : 'คลิกเพื่อสั่งบิน';
+  }
+  // เคอร์เซอร์เป็นเป้าเฉพาะตอนปลดล็อก (โหมด Waypoint คุมเคอร์เซอร์ของตัวเอง)
+  if(map && !waypointMode){
+    map.getContainer().style.cursor = gotoArmed ? 'crosshair' : '';
+  }
+}
+
+// ซ่อนปุ่มเมื่ออยู่โหมดที่คลิก "ไม่ใช่คำสั่งบิน" อยู่แล้ว (waypoint/วาด/ยุทธวิธี)
+function _gotoArmSync(){
+  var el = document.getElementById('goto-arm');
+  if(!el) return;
+  var busy = waypointMode || tacTool !== 'none' || drawTool !== 'none';
+  el.classList.toggle('hidden', busy);
+  if(busy && gotoArmed) setGotoArmed(false);   // ออกจากโหมดสั่งบิน = ล็อกกลับ
+}
+
+(function(){
+  var el = document.getElementById('goto-arm');
+  if(!el) return;
+  // กันคลิกปุ่มทะลุลงไปเป็นคลิกแผนที่ (ไม่งั้นกดปุ่ม = สั่งบินทันที)
+  L.DomEvent.disableClickPropagation(el);
+  L.DomEvent.disableScrollPropagation(el);
+  el.addEventListener('click', function(){
+    setGotoArmed(!gotoArmed);
+    if(bridge) bridge.on_map_event(JSON.stringify(
+      {event:'goto_arm', on:gotoArmed}));
+  });
+})();
+
+function _wpNumberIcon(color, num, extraClass, action, waitSeconds){
+  var actionClass = action === 'servo_a' ? ' wp-servo-a' : action === 'servo_b' ? ' wp-servo-b' : '';
+  var suffix = action === 'servo_a' ? '<span class="wp-action">A</span>' :
+               action === 'servo_b' ? '<span class="wp-action">B</span>' : '';
+  var ws = Number(waitSeconds) || 0;
+  // WAIT badge แสดง "W" + นาที (ปัดลง) — คงความหมาย action A/B ไว้เหมือนเดิม
+  var wait = ws > 0 ? '<span class="wp-wait">W'+Math.floor(ws/60)+'</span>' : '';
+  var html = '<div class="wp-dot'+actionClass+'" style="background:'+color+'">'+num+suffix+'</div>'+wait;
+  return L.divIcon({className:'wp-marker '+(extraClass||''), iconSize:[22,22],
+                    iconAnchor:[11,11], html:html});
+}
+
+// วาง waypoint จุดใหม่ให้โดรน 1 ลำ + ต่อเส้นประจากจุดก่อนหน้า (ถ้ามี)
+function addWaypoint(droneId, lat, lon, color, index, action, waitSeconds){
+  var ws = Number(waitSeconds) || 0;
+  var m = L.marker([lat, lon], {
+    icon: _wpNumberIcon(color, index + 1, '', action || '', ws), interactive: true
+  }).addTo(map);
+  m.on('contextmenu', function(e){
+    if(e.originalEvent) L.DomEvent.stop(e.originalEvent);
+    if(bridge) bridge.on_map_event(JSON.stringify(
+      {event:'waypoint_context', drone_id:Number(droneId), index:Number(index)}));
+  });
+  if(!waypoints[droneId]) waypoints[droneId] = [];
+  waypoints[droneId].push({idx:index, lat:lat, lon:lon, marker:m, color:color,
+                           action:action || '', wait:ws});
+
+  var pts = waypoints[droneId].map(function(w){ return [w.lat, w.lon]; });
+  if(waypointLines[droneId]){
+    waypointLines[droneId].setLatLngs(pts);
+  } else if(pts.length >= 1){
+    waypointLines[droneId] = L.polyline(pts, {
+      color: color, weight: 2.4, opacity: 0.85,
+      dashArray: '10 6', lineCap: 'round', interactive: false
+    }).addTo(map);
+  }
+}
+
+// อัปเดต metadata กลางของ waypoint (action และ/หรือ WAIT) แล้ววาดหมุดใหม่
+function setWaypointMeta(droneId, index, action, waitSeconds){
+  var list = waypoints[droneId] || [];
+  for(var i=0;i<list.length;i++){
+    var w = list[i];
+    if(w.idx !== Number(index)) continue;
+    if(action !== null && action !== undefined) w.action = action || '';
+    if(waitSeconds !== null && waitSeconds !== undefined) w.wait = Number(waitSeconds) || 0;
+    w.marker.setIcon(_wpNumberIcon(w.color, Number(index)+1, '', w.action, w.wait));
+    return true;
+  }
+  return false;
+}
+
+// คง API เดิมไว้เป็น compatibility wrapper (ลด regression ฝั่งที่เรียกอยู่แล้ว)
+function setWaypointAction(droneId, index, action){
+  return setWaypointMeta(droneId, index, action, null);
+}
+
+function setWaypointWait(droneId, index, waitSeconds){
+  return setWaypointMeta(droneId, index, null, waitSeconds);
+}
+
+// ลบ waypoint จุดสุดท้ายของโดรนนั้น (Undo) + อัปเดตเส้นประ
+function removeLastWaypoint(droneId){
+  var list = waypoints[droneId];
+  if(!list || !list.length) return false;
+  var last = list.pop();
+  if(last.marker) map.removeLayer(last.marker);
+  if(waypointLines[droneId]){
+    if(list.length >= 1){
+      waypointLines[droneId].setLatLngs(list.map(function(w){ return [w.lat, w.lon]; }));
+    } else {
+      map.removeLayer(waypointLines[droneId]);
+      delete waypointLines[droneId];
+    }
+  }
+  return true;
+}
+
+// ลบจุด+เส้นของโดรน 1 ลำ
+function clearWaypoints(droneId){
+  var list = waypoints[droneId];
+  if(list) list.forEach(function(w){ if(w.marker) map.removeLayer(w.marker); });
+  delete waypoints[droneId];
+  if(waypointLines[droneId]){ map.removeLayer(waypointLines[droneId]); delete waypointLines[droneId]; }
+}
+
+// ลบทั้งหมดทุกลำ
+function clearAllWaypoints(){
+  Object.keys(waypoints).forEach(clearWaypoints);
+  waypoints = {}; waypointLines = {};
+}
+
+// ไฮไลต์จุดที่กำลังบินไป (กะพริบ)
+function highlightWaypoint(droneId, index){
+  var list = waypoints[droneId];
+  if(!list) return;
+  list.forEach(function(w){
+    var el = w.marker && w.marker.getElement();
+    if(!el) return;
+    el.classList.remove('wp-active');
+    if(w.idx === index) el.classList.add('wp-active');
+  });
+}
+
+// เปลี่ยนจุดที่ผ่านแล้วเป็นสีจาง
+function markWaypointDone(droneId, index){
+  var list = waypoints[droneId];
+  if(!list) return;
+  list.forEach(function(w){
+    if(w.idx !== index) return;
+    var el = w.marker && w.marker.getElement();
+    if(!el) return;
+    el.classList.remove('wp-active');
+    el.classList.add('wp-done');
+  });
+}
+
+function resetWaypointProgress(droneId){
+  var list = waypoints[droneId] || [];
+  list.forEach(function(w){
+    var el = w.marker && w.marker.getElement();
+    if(!el) return;
+    el.classList.remove('wp-active');
+    el.classList.remove('wp-done');
+  });
+}
+
+function waypointCount(droneId){
+  var list = waypoints[droneId];
+  return list ? list.length : 0;
+}
+
+// ══════════════════════════════════════════════════════════
+//  TACTICAL PLANNING LAYER — แยกจาก Geofence โดยสิ้นเชิง
+//  geofence = เขตห้ามบิน (บังคับที่ core) · tactical = วางแผนอย่างเดียว
+// ══════════════════════════════════════════════════════════
+const TAC_COLOR = '#38bdf8';
+
+function _tacEnsure(){
+  if(!tacLayer){ tacLayer = L.featureGroup().addTo(map); }
+  return tacLayer;
+}
+
+function setTacticalTool(tool){
+  tacTool = tool || 'none';
+  tacPts = [];
+  if(tacTmp){ map.removeLayer(tacTmp); tacTmp = null; }
+  if(tacTool !== 'none'){
+    // กันชนกับเครื่องมือ geofence — เปิดได้ทีละระบบ
+    drawTool = 'none'; fencePts = []; rectStart = null; circleCenter = null;
+    if(fenceTmp){ map.removeLayer(fenceTmp); fenceTmp = null; }
+  }
+  // ดับเบิลคลิกใช้จบรูป → ปิด zoom ชั่วคราวไม่ให้แผนที่ซูมแทน
+  if(tacTool === 'line' || tacTool === 'polygon'){ map.doubleClickZoom.disable(); }
+  else { map.doubleClickZoom.enable(); }
+  map.getContainer().style.cursor = (tacTool === 'none') ? '' : 'crosshair';
+  _gotoArmSync();
+}
+
+function setTacticalText(txt){ tacPendingText = txt || ''; }
+
+// อัปโหลดสัญลักษณ์ (dataURL) เก็บไว้ในหน่วยความจำชั่วคราว
+function addTacticalIcon(name, dataUrl){
+  tacIcons[name] = dataUrl;
+  tacActiveIcon = name;
+}
+function useTacticalIcon(name){
+  if(tacIcons[name]){ tacActiveIcon = name; setTacticalTool('icon'); return true; }
+  return false;
+}
+function listTacticalIcons(){ return JSON.stringify(Object.keys(tacIcons)); }
+
+function _tacRegister(layer, props){
+  layer.feature = layer.feature || {type:'Feature', properties:{}};
+  Object.assign(layer.feature.properties, props || {});
+  _tacEnsure().addLayer(layer);
+  tacUndo.push(layer);
+  return layer;
+}
+
+function _tacPreview(kind, pts){
+  if(tacTmp){ map.removeLayer(tacTmp); tacTmp = null; }
+  if(!pts || pts.length < 2) return;
+  var ll = pts.map(function(p){ return [p.lat, p.lon]; });
+  if(kind === 'polygon'){
+    tacTmp = L.polygon(ll, {color:TAC_COLOR, weight:1.5, dashArray:'4',
+                            fillOpacity:0.08}).addTo(map);
+  } else {
+    tacTmp = L.polyline(ll, {color:TAC_COLOR, weight:1.5, dashArray:'4'}).addTo(map);
+  }
+}
+
+function _tacClick(ll){
+  if(tacTool === 'line' || tacTool === 'polygon'){
+    tacPts.push(ll);
+    _tacPreview(tacTool, tacPts);
+    return;
+  }
+  if(tacTool === 'circle'){
+    if(!tacPts.length){ tacPts.push(ll); return; }
+    var r = _haversine(tacPts[0], ll);
+    if(r < 1) r = 1;
+    _tacRegister(L.circle([tacPts[0].lat, tacPts[0].lon], {
+      radius:r, color:TAC_COLOR, weight:2, fillOpacity:0.08
+    }), {tac:'circle', radius:r});
+    tacPts = [];
+    if(tacTmp){ map.removeLayer(tacTmp); tacTmp = null; }
+    return;
+  }
+  if(tacTool === 'text'){
+    if(!tacPendingText) return;
+    _tacRegister(L.marker([ll.lat, ll.lon], {
+      icon: L.divIcon({className:'tac-text', html:_esc(tacPendingText),
+                       iconSize:null, iconAnchor:[0,0]})
+    }), {tac:'text', text:tacPendingText});
+    return;
+  }
+  if(tacTool === 'icon'){
+    if(!tacActiveIcon || !tacIcons[tacActiveIcon]) return;
+    var url = tacIcons[tacActiveIcon];
+    _tacRegister(L.marker([ll.lat, ll.lon], {
+      icon: L.icon({iconUrl:url, iconSize:[38,38], iconAnchor:[19,19],
+                    className:'tac-icon'})
+    }), {tac:'icon', icon:tacActiveIcon});
+    return;
+  }
+}
+
+// จบรูปที่วาดค้าง (เส้น/รูปหลายเหลี่ยม) — เรียกตอนกด "เสร็จ" หรือดับเบิลคลิก
+function finishTactical(){
+  if((tacTool === 'line' || tacTool === 'polygon') && tacPts.length >= 2){
+    var ll = tacPts.map(function(p){ return [p.lat, p.lon]; });
+    if(tacTool === 'polygon' && tacPts.length >= 3){
+      _tacRegister(L.polygon(ll, {color:TAC_COLOR, weight:2, fillOpacity:0.10}),
+                   {tac:'polygon'});
+    } else {
+      _tacRegister(L.polyline(ll, {color:TAC_COLOR, weight:2.5}), {tac:'line'});
+    }
+  }
+  tacPts = [];
+  if(tacTmp){ map.removeLayer(tacTmp); tacTmp = null; }
+}
+
+function undoTactical(){
+  var l = tacUndo.pop();
+  if(l && tacLayer){ tacLayer.removeLayer(l); return true; }
+  return false;
+}
+
+function clearTactical(){
+  if(tacLayer){ tacLayer.clearLayers(); }
+  tacUndo = [];
+  tacPts = [];
+  if(tacTmp){ map.removeLayer(tacTmp); tacTmp = null; }
+}
+
+function _esc(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Save / Load แผนยุทธวิธี เป็น GeoJSON ──
+function getTacticalGeoJSON(){
+  var feats = [];
+  if(tacLayer){
+    tacLayer.eachLayer(function(l){
+      var props = (l.feature && l.feature.properties) || {};
+      var kind = props.tac;
+      if(kind === 'circle'){
+        var c = l.getLatLng();
+        feats.push({type:'Feature',
+          geometry:{type:'Point', coordinates:[c.lng, c.lat]},
+          properties:{tac:'circle', radius:l.getRadius()}});
+      } else if(kind === 'text' || kind === 'icon'){
+        var p = l.getLatLng();
+        feats.push({type:'Feature',
+          geometry:{type:'Point', coordinates:[p.lng, p.lat]},
+          properties:props});
+      } else if(kind === 'polygon'){
+        var ring = l.getLatLngs()[0].map(function(p){ return [p.lng, p.lat]; });
+        if(ring.length) ring.push(ring[0]);
+        feats.push({type:'Feature',
+          geometry:{type:'Polygon', coordinates:[ring]}, properties:{tac:'polygon'}});
+      } else if(kind === 'line'){
+        var cs = l.getLatLngs().map(function(p){ return [p.lng, p.lat]; });
+        feats.push({type:'Feature',
+          geometry:{type:'LineString', coordinates:cs}, properties:{tac:'line'}});
+      }
+    });
+  }
+  return JSON.stringify({type:'FeatureCollection', features:feats,
+                         icons:tacIcons});
+}
+
+function loadTacticalGeoJSON(js){
+  var data;
+  try { data = JSON.parse(js || '{}'); } catch(e){ return 0; }
+  clearTactical();
+  if(data.icons){ for(var k in data.icons) tacIcons[k] = data.icons[k]; }
+  var feats = data.features || [];
+  var n = 0;
+  feats.forEach(function(f){
+    var p = f.properties || {}, g = f.geometry || {};
+    if(p.tac === 'circle' && g.type === 'Point'){
+      _tacRegister(L.circle([g.coordinates[1], g.coordinates[0]], {
+        radius:p.radius || 10, color:TAC_COLOR, weight:2, fillOpacity:0.08}),
+        {tac:'circle', radius:p.radius});
+    } else if(p.tac === 'text' && g.type === 'Point'){
+      _tacRegister(L.marker([g.coordinates[1], g.coordinates[0]], {
+        icon:L.divIcon({className:'tac-text', html:_esc(p.text||''),
+                        iconSize:null, iconAnchor:[0,0]})}),
+        {tac:'text', text:p.text});
+    } else if(p.tac === 'icon' && g.type === 'Point'){
+      var url = tacIcons[p.icon];
+      if(!url) return;
+      _tacRegister(L.marker([g.coordinates[1], g.coordinates[0]], {
+        icon:L.icon({iconUrl:url, iconSize:[38,38], iconAnchor:[19,19],
+                     className:'tac-icon'})}), {tac:'icon', icon:p.icon});
+    } else if(p.tac === 'polygon' && g.type === 'Polygon'){
+      var ring = (g.coordinates[0]||[]).map(function(c){ return [c[1], c[0]]; });
+      _tacRegister(L.polygon(ring, {color:TAC_COLOR, weight:2, fillOpacity:0.10}),
+                   {tac:'polygon'});
+    } else if(p.tac === 'line' && g.type === 'LineString'){
+      var cs = (g.coordinates||[]).map(function(c){ return [c[1], c[0]]; });
+      _tacRegister(L.polyline(cs, {color:TAC_COLOR, weight:2.5}), {tac:'line'});
+    } else { return; }
+    n++;
+  });
+  return n;
+}
+
+function tacticalCount(){
+  var n = 0;
+  if(tacLayer) tacLayer.eachLayer(function(){ n++; });
+  return n;
+}
+
+function getBoundsJSON(){
+  var b = map.getBounds();
+  return JSON.stringify({north:b.getNorth(), south:b.getSouth(),
+    east:b.getEast(), west:b.getWest(), zoom:map.getZoom()});
+}
+function setNet(on){ /* map UI โล่ง — ไม่โชว์ HUD */ }
+
+initMap();
+if(typeof qt !== 'undefined'){
+  new QWebChannel(qt.webChannelTransport, function(channel){
+    bridge = channel.objects.bridge;
+  });
+}
+</script>
+</body>
+</html>

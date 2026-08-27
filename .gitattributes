@@ -1,0 +1,8 @@
+# บังคับ LF ทุกไฟล์ข้อความ — กัน CRLF ทำ bash script ใน WSL พัง
+* text=auto eol=lf
+*.sh   text eol=lf
+*.go   text eol=lf
+*.proto text eol=lf
+*.md   text eol=lf
+*.png  binary
+*.jpg  binary

@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package swarmgod.v1;
+
+option go_package = "github.com/swarmgod/backend/gen/swarmgod/v1;swarmgodv1";
+
+import "swarmgod/v1/common.proto";
+import "swarmgod/v1/telemetry.proto";
+import "swarmgod/v1/command.proto";
+import "swarmgod/v1/swarm.proto";
+import "swarmgod/v1/mission.proto";
+
+// ═══════════════════════════════════════════════════════════
+//  SwarmGodService — สัญญากลางเดียวที่ Python cockpit ↔ Go core
+//  ทุก RPC ต้องแนบ metadata: authorization=Bearer <session-token>
+//  ช่องทางเป็น mTLS (ดู SECURITY.md)
+// ═══════════════════════════════════════════════════════════
+service SwarmGodService {
+  // ── streams (core → cockpit) ──
+  rpc SubscribeTelemetry(SubscribeTelemetryRequest) returns (stream Telemetry);
+  rpc SubscribeEvents(EventSubscribeRequest)        returns (stream Event);
+  rpc GetFleetSnapshot(FleetSnapshotRequest)        returns (FleetSnapshot);
+
+  // ── fleet management ──
+  rpc Connect(ConnectRequest)       returns (CommandResult);
+  rpc Disconnect(DisconnectRequest) returns (CommandResult);
+
+  // ── flight commands (unary + ACK; ผ่าน safety envelope) ──
+  rpc Arm(ArmRequest)                 returns (CommandResult);
+  rpc Disarm(DisarmRequest)           returns (CommandResult);
+  rpc Kill(KillRequest)               returns (CommandResult);
+  rpc Takeoff(TakeoffRequest)         returns (CommandResult);
+  rpc Land(LandRequest)               returns (CommandResult);
+  rpc ReturnToLaunch(RtlRequest)      returns (CommandResult);
+  rpc Hold(HoldRequest)               returns (CommandResult);
+  rpc Goto(GotoRequest)               returns (CommandResult);
+  rpc ChangeAlt(ChangeAltRequest)     returns (CommandResult);
+  rpc EqualizeAlt(EqualizeAltRequest) returns (CommandResult);
+  // Roadmap RPC: ยังไม่มี handler ใน core ปัจจุบัน (client จะได้ Unimplemented)
+  rpc ChangeSpeed(ChangeSpeedRequest) returns (CommandResult);
+  rpc RcMove(RcMoveRequest)           returns (CommandResult);
+  // Roadmap RPC: ยังไม่มี handler ใน core ปัจจุบัน
+  rpc SetYaw(SetYawRequest)           returns (CommandResult);
+  rpc StopAll(StopAllRequest)         returns (CommandResult);
+  rpc SetMode(SetModeRequest)         returns (CommandResult);
+
+  // ── mission (roadmap; ยังไม่มี handler ใน core ปัจจุบัน) ──
+  rpc UploadMission(UploadMissionRequest)   returns (CommandResult);
+  rpc MissionControl(MissionControlRequest) returns (CommandResult);
+  rpc Orbit(OrbitRequest)                   returns (CommandResult);
+
+  // ── run-based mission (Fast-Track V2 F3: Core run identity + Start/Cancel/Query) ──
+  // ยังไม่ถือ flight authority — Go เป็น shadow จน F4 cutover
+  rpc StartMission(StartMissionRequest)       returns (StartMissionResponse);
+  rpc CancelMission(CancelMissionRequest)     returns (CommandResult);
+  rpc GetMissionState(GetMissionStateRequest) returns (MissionStateResponse);
+
+  // ── payload ──
+  rpc Gimbal(GimbalRequest) returns (CommandResult); // roadmap
+  rpc Servo(ServoRequest)   returns (CommandResult);
+
+  // ── params ──
+  rpc ParamGet(ParamGetRequest)   returns (ParamValue); // roadmap
+  rpc ParamSet(ParamSetRequest)   returns (CommandResult);
+  rpc ParamList(ParamListRequest) returns (ParamListResponse); // roadmap
+
+  // ── geofence ──
+  rpc SetGeofence(SetGeofenceRequest) returns (CommandResult);
+
+  // ── swarm ──
+  rpc SetLeader(SetLeaderRequest)       returns (CommandResult);
+  rpc SetSwarmConfig(SwarmConfig)       returns (CommandResult);
+  rpc SwarmControl(SwarmControlRequest) returns (CommandResult);
+  rpc GetSwarmState(SwarmStateRequest)  returns (SwarmState);
+}
+
+message EventSubscribeRequest {}
+message FleetSnapshotRequest {}
+message ParamListRequest { uint32 drone_id = 1; }
+message SwarmStateRequest {}

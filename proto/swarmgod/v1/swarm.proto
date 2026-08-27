@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package swarmgod.v1;
+
+option go_package = "github.com/swarmgod/backend/gen/swarmgod/v1;swarmgodv1";
+
+// ═══════════════════════════════════════════════════════════
+//  SWARM — leader/follower formation (จาก swarm_manager.py เดิม)
+//  รองรับ multi-level: D1→D2,D3 และ D3→D4,D5
+// ═══════════════════════════════════════════════════════════
+
+message FormationOffset {
+  uint32 follower_id = 1;
+  double north       = 2;  // m
+  double east        = 3;  // m
+  double up          = 4;  // m
+}
+
+message SetLeaderRequest {
+  uint32                   leader_id = 1;
+  repeated FormationOffset followers = 2;
+}
+
+enum HeadingMode {
+  HEADING_MODE_HEAD_TO_DIR = 0;  // offset หมุนตาม heading ของ leader
+  HEADING_MODE_KEEP        = 1;  // offset เป็น NED absolute
+}
+
+// รูปแบบขบวน (จัดตำแหน่งลูกรอบตัวแม่)
+enum Formation {
+  FORMATION_WEDGE   = 0;  // ลิ่ม / V — ลูกกระจายซ้าย-ขวาถอยหลัง
+  FORMATION_LINE    = 1;  // หน้ากระดาน — เรียงข้างกันแนวเดียว
+  FORMATION_COLUMN  = 2;  // แถวตอน — เรียงหลังกันเป็นเส้นเดียว
+  FORMATION_DIAMOND = 3;  // เพชร — ซ้าย/ขวา/หลัง
+  FORMATION_ECHELON = 4;  // ทแยง — เฉียงข้างเดียว
+}
+enum YawMode {
+  YAW_MODE_MATCH_LEADER = 0;
+  YAW_MODE_FREE         = 1;
+}
+
+message SwarmConfig {
+  HeadingMode heading_mode = 1;
+  YawMode     yaw_mode     = 2;
+  double      form_speed   = 3;  // m/s ตอนจัดฟอร์ม
+  double      spacing      = 4;  // ระยะห่างฐาน (m) — ต้อง >= MinSeparation
+  Formation   formation    = 5;  // รูปแบบขบวน
+}
+
+message SwarmControlRequest {
+  enum Action { START = 0; HOLD = 1; STOP = 2; RETURN = 3; }  // RETURN = กลับฐาน+ลงจอดกันชน
+  Action action = 1;
+  repeated uint32 drone_ids = 2; // RETURN: ว่าง = ทุกลำ online
+  double return_base_alt = 3;    // core clamp >= 15m
+  double return_gap = 4;         // core clamp >= MinSeparation
+  string request_id = 15;
+}
+
+// สถานะฟอร์เมชันปัจจุบัน (ให้ UI วาดเส้น leader→follower + โชว์ตัวแม่)
+message SwarmState {
+  message Edge { uint32 leader_id = 1; uint32 follower_id = 2; }
+  repeated Edge edges        = 1;
+  bool          active       = 2;
+  HeadingMode   heading_mode = 3;
+  YawMode       yaw_mode     = 4;
+  uint32        leader_id    = 5;  // ตัวแม่ปัจจุบัน (เปลี่ยนได้จาก failover)
+  string        note         = 6;  // ข้อความสถานะ (เช่น "leader UAV_1 lost -> promoted UAV_2")
+  Formation     formation    = 7;  // รูปแบบขบวนปัจจุบัน
+  double        spacing      = 8;  // ระยะห่างที่ตั้งไว้ (m)
+}

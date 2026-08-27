@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package swarmgod.v1;
+
+option go_package = "github.com/swarmgod/backend/gen/swarmgod/v1;swarmgodv1";
+
+import "swarmgod/v1/common.proto";
+
+// ═══════════════════════════════════════════════════════════
+//  COMMAND SURFACE — ครบตาม GCS_1 เดิม
+//  ทุก command วิ่งผ่าน safety.Envelope ที่ core ก่อนออกไปโดรน
+// ═══════════════════════════════════════════════════════════
+
+// เป้าหมาย: ลำเดียวหรือหลายลำ (แทน multi-select เดิม)
+message Target {
+  repeated uint32 drone_ids = 1;
+}
+
+// ── connection ──
+message ConnectRequest {
+  uint32 drone_id = 1;
+  string name     = 2;
+  string protocol = 3;  // "tcp" | "udp"
+  string host     = 4;
+  uint32 port     = 5;
+}
+message DisconnectRequest { uint32 drone_id = 1; }
+
+// request_id (field 15) = UUID จาก client สำหรับ idempotency (spec §8.2)
+// ว่าง = ไม่ dedup (backward-compatible กับ client เก่า)
+
+// ── arm / disarm / kill ──
+message ArmRequest    { Target target = 1; bool force = 2; string request_id = 15; }
+message DisarmRequest { Target target = 1; bool confirmed = 2; string request_id = 15; } // in-air ต้อง confirm
+message KillRequest   { Target target = 1; bool confirmed = 2; string request_id = 15; } // ต้อง confirm เสมอ
+
+// ── takeoff / land / rtl / hold ──
+message TakeoffRequest { Target target = 1; double altitude = 2; bool confirmed = 3; string request_id = 15; }
+message LandRequest    { Target target = 1; string request_id = 15; }
+message RtlRequest     { Target target = 1; string request_id = 15; }
+message HoldRequest    { Target target = 1; string request_id = 15; }
+
+// ── navigate ──
+message GotoRequest        { uint32 drone_id = 1; double lat = 2; double lon = 3; double alt = 4; double speed = 5; string request_id = 15; }
+message ChangeAltRequest   { Target target = 1; double altitude = 2; string request_id = 15; } // set absolute rel-alt
+message EqualizeAltRequest { Target target = 1; double altitude = 2; }
+message ChangeSpeedRequest { Target target = 1; double speed = 2; }
+
+// ── RC / attitude (hold-to-move เหมือนปุ่มทิศทางเดิม) ──
+enum RcDirection {
+  RC_DIR_STOP  = 0;
+  RC_DIR_FWD   = 1;
+  RC_DIR_BWD   = 2;
+  RC_DIR_LEFT  = 3;
+  RC_DIR_RIGHT = 4;
+  RC_DIR_UP    = 5;
+  RC_DIR_DOWN  = 6;
+  RC_DIR_YAW_L = 7;
+  RC_DIR_YAW_R = 8;
+}
+message RcMoveRequest { Target target = 1; RcDirection dir = 2; double speed = 3; double yaw_rate = 4; }
+message SetYawRequest { Target target = 1; double yaw_deg = 2; }
+message StopAllRequest { Target target = 1; }
+
+// ── mode ──
+message SetModeRequest { Target target = 1; FlightMode mode = 2; string request_id = 15; }
+
+// ── mission / waypoints ──
+message Waypoint {
+  double lat = 1; double lon = 2; double alt = 3; double speed = 4;
+  string action = 5; // "nav" | "loiter" | "photo" | "bomb_drop" | ...
+}
+message UploadMissionRequest { uint32 drone_id = 1; repeated Waypoint waypoints = 2; bool rtl_after = 3; }
+message MissionControlRequest {
+  Target target = 1;
+  enum Action { START = 0; PAUSE = 1; RESUME = 2; STOP = 3; CLEAR = 4; }
+  Action action = 2;
+}
+message OrbitRequest { uint32 drone_id = 1; double lat = 2; double lon = 3; double radius = 4; double speed = 5; }
+
+// ── gimbal / servo ──
+message GimbalRequest {
+  uint32 drone_id = 1;
+  enum Action { PAN = 0; TILT = 1; CENTER = 2; RELEASE = 3; }
+  Action action = 2;
+  double delta  = 3; // สำหรับ pan/tilt
+}
+message ServoRequest {
+  uint32 drone_id = 1;
+  enum Action { SET = 0; RELEASE = 1; RESET = 2; }
+  Action action  = 2;
+  uint32 pwm     = 3;   // 900..2100 μs (clamp ที่ core ตาม servo.md)
+  uint32 channel = 4;   // servo output channel (A=7, B=8); 0 = ใช้ default 8 เพื่อความเข้ากันได้ย้อนหลัง
+}
+
+// ── geofence (ตั้งจาก cockpit → บังคับที่ core) ──
+message GeoVertex { double lat = 1; double lon = 2; }
+message SetGeofenceRequest {
+  repeated GeoVertex points = 1; // ว่าง = ปิด fence
+  bool confirmed = 2;
+  string request_id = 15;
+}
+
+// ── params ──
+message ParamGetRequest   { uint32 drone_id = 1; string param_id = 2; }
+message ParamSetRequest   { uint32 drone_id = 1; string param_id = 2; double value = 3; }
+message ParamValue        { string param_id = 1; double value = 2; }
+message ParamListResponse { repeated ParamValue params = 1; bool loaded = 2; }

@@ -1,0 +1,409 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>SwarmGod — 3D terrain probe</title>
+<style>
+  html,body{height:100%;margin:0;background:#04090b;color:#c8d0d8;
+            font:12px "Segoe UI",sans-serif;overflow:hidden;}
+  #view{position:absolute;inset:0;}
+  #hud{position:absolute;left:10px;top:10px;z-index:10;max-width:460px;
+       background:rgba(10,16,20,.92);border:1px solid #232a31;border-radius:8px;
+       padding:10px 12px;line-height:1.55;}
+  #hud h1{margin:0 0 6px;font-size:12px;letter-spacing:.5px;color:#e8edf2;}
+  .row{display:flex;gap:8px;}
+  .k{color:#8b96a2;min-width:104px;}
+  .v{color:#e8edf2;word-break:break-word;}
+  .ok{color:#38e08b;} .bad{color:#ef4444;} .warn{color:#eab308;}
+  #fps{position:absolute;right:10px;top:10px;z-index:10;
+       background:rgba(10,16,20,.92);border:1px solid #232a31;border-radius:8px;
+       padding:8px 12px;font:700 14px "Segoe UI",sans-serif;}
+</style>
+</head>
+<body>
+<div id="view"></div>
+<div id="hud"><h1>3D TERRAIN PROBE</h1><div id="lines"></div></div>
+<div id="fps">-- fps</div>
+
+<script type="module">
+// static import เท่านั้น — QtWebEngine 5.15.2 **ไม่รองรับ dynamic import()**
+// (fetch ไฟล์เดียวกันผ่าน แต่ import() ตอบ "Failed to fetch dynamically imported
+//  module" ทุกครั้ง ทั้ง path แบบ relative และ absolute) ดู README ข้อจำกัด
+// three r170 = ตัวใหม่สุดที่ Chromium 83 ยังรันได้ (r178+ พังทันที — ดู README)
+import * as THREE from "/vendor/three/three-0.170.0.js";
+import { OrbitControls } from "/vendor/three/OrbitControls-170.js";
+
+// ══════════════════════════════════════════════════════════════
+//  Probe: พิสูจน์ทีละขั้นว่า QWebEngine ทำอะไรได้บ้าง
+//  แต่ละขั้นแยกกัน — ขั้นไหนพังจะรู้ทันทีว่าพังตรงไหน ไม่ใช่ "ไม่ขึ้นเฉย ๆ"
+//  ผลทุกขั้นส่งกลับ Python ผ่าน console.log (#PROBE# json) ให้ probe.py อ่าน
+//
+//  ข้อจำกัดที่ต้องเขียนตาม: QtWebEngine 5.15.2 = **Chromium 83**
+//    · ไม่มี import maps      (มาใน Chromium 89) → import ด้วย path ตรง
+//    · ไม่มี top-level await   (มาใน Chromium 89) → ห่อด้วย async IIFE
+//  สองอย่างนี้คือสิ่งที่ SIAHRA ใช้ ถ้าจะยกโค้ดเขามาต้องแก้ตรงนี้ก่อนเสมอ
+// ══════════════════════════════════════════════════════════════
+const R = {};                       // ผลรวมทุกขั้น
+const linesEl = document.getElementById("lines");
+main();                             // ห่อไว้เพราะไม่มี top-level await (Chromium 83)
+async function main() {
+
+function say(key, value, cls) {
+  R[key] = value;
+  const d = document.createElement("div");
+  d.className = "row";
+  d.innerHTML = `<span class="k">${key}</span>` +
+                `<span class="v ${cls || ""}">${value}</span>`;
+  linesEl.appendChild(d);
+  console.log(`#PROBE# ${JSON.stringify({ k: key, v: String(value), c: cls || "" })}`);
+}
+function done(verdict) {
+  console.log(`#PROBE-DONE# ${JSON.stringify({ verdict, results: R })}`);
+}
+window.addEventListener("error", (e) => {
+  say("js error", e.message, "bad");
+  done("FAIL");
+});
+
+// ── ขั้น 1: WebGL มีจริงไหม + เรนเดอร์ด้วยอะไร ────────────────
+// สำคัญสุด: ถ้าได้ SwiftShader = ซอฟต์แวร์ล้วน ไม่ใช่ GPU → ช้าเกินใช้งานจริง
+function probeWebGL() {
+  const c = document.createElement("canvas");
+  const gl = c.getContext("webgl2") || c.getContext("webgl");
+  if (!gl) { say("webgl", "ไม่มี WebGL context", "bad"); return null; }
+  say("webgl", gl instanceof WebGL2RenderingContext ? "WebGL 2" : "WebGL 1", "ok");
+  const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+  const renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "(ปิดข้อมูล)";
+  const vendor = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : "(ปิดข้อมูล)";
+  const soft = /swiftshader|software|llvmpipe|basic render/i.test(String(renderer));
+  say("gpu", renderer, soft ? "warn" : "ok");
+  say("vendor", vendor);
+  if (soft) say("หมายเหตุ", "เรนเดอร์ด้วยซอฟต์แวร์ ไม่ใช่ GPU จริง", "warn");
+  say("max texture", gl.getParameter(gl.MAX_TEXTURE_SIZE) + " px");
+  return { soft };
+}
+const glInfo = probeWebGL();
+if (!glInfo) { done("FAIL"); throw new Error("no webgl");}
+
+// ── ขั้น 2: three.js โหลดได้ไหม (ES module + importmap ใน QWebEngine) ──
+if (!THREE || !THREE.REVISION || typeof OrbitControls !== "function") {
+  say("three.js", "โมดูลโหลดไม่ครบ", "bad");
+  done("FAIL");
+  throw new Error("three not loaded");
+}
+say("three.js", "r" + THREE.REVISION + " + OrbitControls (static import)", "ok");
+
+// ── ขั้น 3: manifest + terrain.bin ────────────────────────────
+const AOI = "30";
+let manifest, raw;
+try {
+  manifest = await (await fetch(`/aoi/${AOI}/manifest.json`)).json();
+  say("manifest", `${manifest.provinceNameTh} (aoi ${manifest.aoiId})`, "ok");
+} catch (err) {
+  say("manifest", "โหลดไม่ได้: " + err.message, "bad"); done("FAIL"); throw err;
+}
+
+const T = manifest.terrain;
+const B = manifest.bbox;
+let imageryTex = null;
+try {
+  const t0 = performance.now();
+  const buf = await (await fetch(T.url.replace(/^\/aoi\//, "/aoi/"))).arrayBuffer();
+  const ms = (performance.now() - t0).toFixed(0);
+  // format: Int16 ดิบ row-major ไม่มี header, row 0 = ขอบเหนือ, nodata -32768
+  raw = new Int16Array(buf);
+  const expect = T.width * T.height;
+  if (raw.length !== expect) {
+    say("terrain.bin", `ขนาดไม่ตรง: ได้ ${raw.length} ต้องการ ${expect}`, "bad");
+    done("FAIL"); throw new Error("size mismatch");
+  }
+  say("terrain.bin", `${(buf.byteLength / 1048576).toFixed(2)} MB · ` +
+                     `${T.width}x${T.height} @ ${T.cellSizeM}m · ${ms}ms`, "ok");
+} catch (err) {
+  say("terrain.bin", "โหลด/parse ไม่ได้: " + err.message, "bad"); done("FAIL"); throw err;
+}
+
+// ── ขั้น 4: ค่าความสูงสมเหตุสมผลไหม (ไม่ใช่แค่ parse ผ่าน) ──
+// ถ้าเลขเพี้ยน (endianness ผิด/ไฟล์คนละชุด) จะจับได้ตรงนี้ ไม่ใช่ตอนเห็นภาพแปลก ๆ
+const NODATA = -32768;
+let mn = Infinity, mx = -Infinity, nodata = 0;
+for (let i = 0; i < raw.length; i++) {
+  const v = raw[i];
+  if (v === NODATA) { nodata++; continue; }
+  if (v < mn) mn = v;
+  if (v > mx) mx = v;
+}
+const claimed = `${T.minZ.toFixed(0)}..${T.maxZ.toFixed(0)}`;
+const near = Math.abs(mn - T.minZ) < 30 && Math.abs(mx - T.maxZ) < 30;
+say("ช่วงความสูง", `${mn}..${mx} m (manifest ${claimed})`, near ? "ok" : "warn");
+say("nodata", `${nodata} เซลล์ (${(nodata / raw.length * 100).toFixed(1)}%)`);
+
+// ── ขั้น 5: สร้าง mesh จริง + เรนเดอร์ ────────────────────────
+const { width: W, height: H, cellSizeM: CELL } = T;
+const heights = new Float32Array(raw.length);
+for (let i = 0; i < raw.length; i++) heights[i] = raw[i] === NODATA ? T.minZ : raw[i];
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x04090b);
+scene.fog = new THREE.Fog(0x04090b, CELL * W * 0.6, CELL * W * 1.8);
+
+const camera = new THREE.PerspectiveCamera(
+  55, innerWidth / innerHeight, 10, CELL * Math.max(W, H) * 4);
+
+const renderer = new THREE.WebGLRenderer({ antialias: !glInfo.soft });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.getElementById("view").appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+// geometry: PlaneGeometry แล้วดันแกน y ตามค่าความสูง
+// convention เดียวกับ SIAHRA: +X ตะวันออก, -Z เหนือ, row 0 = เหนือ
+const t1 = performance.now();
+const geo = new THREE.PlaneGeometry(
+  (W - 1) * CELL, (H - 1) * CELL, W - 1, H - 1);
+geo.rotateX(-Math.PI / 2);            // ให้ระนาบนอนราบ (y = สูง)
+const pos = geo.attributes.position;
+for (let r = 0; r < H; r++) {
+  for (let c = 0; c < W; c++) {
+    pos.setY(r * W + c, heights[r * W + c]);
+  }
+}
+geo.computeVertexNormals();
+const buildMs = (performance.now() - t1).toFixed(0);
+say("mesh", `${(pos.count / 1000).toFixed(0)}k verts · ` +
+            `${((W - 1) * (H - 1) * 2 / 1000).toFixed(0)}k tris · ${buildMs}ms`, "ok");
+
+// ── ขั้น 5b: แปะภาพดาวเทียมจาก tile proxy ของ cockpit ───────────
+// ภูมิประเทศอยู่ในระบบพิกัด UTM แต่ tile เป็น Web Mercator → ต้องแปลงต่อจุด
+// ไม่ใช่ยืดภาพให้พอดีกรอบ (ยืดตรง ๆ ภาพจะเลื่อนจากพื้นจริงหลายร้อยเมตร)
+const params = new URLSearchParams(location.search);
+const TILES = params.get("tiles");            // base_url ของ TileServer
+const ZOOM = parseInt(params.get("zoom") || "10", 10);
+
+// geodesy ย่อจาก SIAHRA apps/web/src/scene/projection.ts (MIT)
+const DEG = Math.PI / 180, EA = 6378137, EF = 1 / 298.257223563, K0 = 0.9996;
+const NF = EF / (2 - EF), NF2 = NF * NF, NF3 = NF2 * NF, NF4 = NF3 * NF;
+const AA = (EA / (1 + NF)) * (1 + NF2 / 4 + NF4 / 64);
+const BETA = [
+  NF / 2 - (2 / 3) * NF2 + (37 / 96) * NF3 - (1 / 360) * NF4,
+  (1 / 48) * NF2 + (1 / 15) * NF3 - (437 / 1440) * NF4,
+  (17 / 480) * NF3 - (37 / 840) * NF4,
+  (4397 / 161280) * NF4,
+];
+function utmToWgs84(easting, northing, zone) {
+  const xi = northing / (K0 * AA), eta = (easting - 500000) / (K0 * AA);
+  let xiP = xi, etaP = eta;
+  for (let j = 1; j <= 4; j++) {
+    xiP -= BETA[j - 1] * Math.sin(2 * j * xi) * Math.cosh(2 * j * eta);
+    etaP -= BETA[j - 1] * Math.cos(2 * j * xi) * Math.sinh(2 * j * eta);
+  }
+  const chi = Math.asin(Math.sin(xiP) / Math.cosh(etaP));
+  const D1 = 2 * NF - (2 / 3) * NF2 - 2 * NF3;
+  const D2 = (7 / 3) * NF2 - (8 / 5) * NF3, D3 = (56 / 15) * NF3;
+  const phi = chi + D1 * Math.sin(2 * chi) + D2 * Math.sin(4 * chi) + D3 * Math.sin(6 * chi);
+  return [(zone * 6 - 183) + Math.atan2(Math.sinh(etaP), Math.cos(xiP)) / DEG, phi / DEG];
+}
+function lonLatToTile(lon, lat, z) {
+  const n = 2 ** z, la = Math.max(-85.05112878, Math.min(85.05112878, lat)) * DEG;
+  return [((lon + 180) / 360) * n,
+          ((1 - Math.log(Math.tan(la) + 1 / Math.cos(la)) / Math.PI) / 2) * n];
+}
+
+// pixel-is-area: เซลล์ (r,c) มีจุดศูนย์กลางที่ origin + (c+0.5)·cell
+// manifest.originNorthing = ขอบ "ใต้" → ขอบเหนือ = origin + height·cell
+const ZONE = Number(String(manifest.utmZone).slice(-2));
+const NORTH_EDGE = manifest.originNorthing + T.height * CELL;
+function cellLonLat(r, c) {
+  return utmToWgs84(manifest.originEasting + (c + 0.5) * CELL,
+                    NORTH_EDGE - (r + 0.5) * CELL, ZONE);
+}
+
+// ตรวจการอ้างอิงพิกัดก่อนแปะภาพ — ถ้าเพี้ยนจะรู้ตรงนี้ ไม่ใช่ตอนเห็นภาพเหลื่อมพื้น
+//
+// เกณฑ์ที่ถูกต้องคือ "bbox ของจังหวัดต้องอยู่ใน raster ทั้งหมด" ไม่ใช่ "มุมต้องตรงกัน":
+//   · raster กว้างกว่า bbox อยู่แล้ว (ETL ปัดขึ้นเป็นจำนวนเซลล์เต็ม → มีขอบเผื่อ)
+//   · raster เป็นสี่เหลี่ยมใน UTM แต่ bbox เป็นสี่เหลี่ยมใน lon/lat — สองอย่างนี้
+//     ไม่มีทางทับกันพอดี ขอบซ้ายบน/ล่างต่างกันหลาย km ตามการบิดของ UTM เป็นเรื่องปกติ
+// margin ติดลบ = raster ครอบจังหวัดไม่หมด → อ้างอิงพิกัดผิดจริง
+{
+  const cs = [cellLonLat(0, 0), cellLonLat(0, T.width - 1),
+              cellLonLat(T.height - 1, 0), cellLonLat(T.height - 1, T.width - 1)];
+  const lons = cs.map((p) => p[0]), lats = cs.map((p) => p[1]);
+  const kmLon = 111.32 * Math.cos(B.minLat * DEG);
+  const mW = (B.minLon - Math.min(...lons)) * kmLon;
+  const mE = (Math.max(...lons) - B.maxLon) * kmLon;
+  const mN = (Math.max(...lats) - B.maxLat) * 111.32;
+  const mS = (B.minLat - Math.min(...lats)) * 111.32;
+  const worst = Math.min(mW, mE, mN, mS);
+  say("ตรวจพิกัด UTM",
+      `bbox อยู่ใน raster · ขอบเผื่อ W${mW.toFixed(1)} E${mE.toFixed(1)} ` +
+      `N${mN.toFixed(1)} S${mS.toFixed(1)} km`,
+      worst >= 0 ? "ok" : "bad");
+}
+
+if (TILES) {
+  try {
+    const t2 = performance.now();
+    // ครอบคลุมทั้ง AOI ที่ zoom ที่เลือก
+    const [tx0f, ty0f] = lonLatToTile(B.minLon, B.maxLat, ZOOM);
+    const [tx1f, ty1f] = lonLatToTile(B.maxLon, B.minLat, ZOOM);
+    const x0 = Math.floor(tx0f), y0 = Math.floor(ty0f);
+    const x1 = Math.floor(tx1f), y1 = Math.floor(ty1f);
+    const nx = x1 - x0 + 1, ny = y1 - y0 + 1;
+
+    const cv = document.createElement("canvas");
+    cv.width = nx * 256; cv.height = ny * 256;
+    const ctx = cv.getContext("2d");
+    ctx.fillStyle = "#1a2a1a"; ctx.fillRect(0, 0, cv.width, cv.height);
+
+    let okN = 0;
+    await Promise.all(Array.from({ length: nx * ny }, (_, i) => {
+      const gx = i % nx, gy = (i / nx) | 0;
+      return new Promise((res) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        // tile_cache เสิร์ฟ cache-first — offline จะได้ tile เทาแทน ไม่ค้าง
+        img.onload = () => { ctx.drawImage(img, gx * 256, gy * 256); okN++; res(); };
+        img.onerror = () => res();
+        img.src = `${TILES}/tile/sat/${ZOOM}/${x0 + gx}/${y0 + gy}.png`;
+      });
+    }));
+
+    // UV: ทุก vertex แปลง UTM -> lon/lat -> พิกัดพิกเซลบนผืนภาพที่ต่อไว้
+    const uv = new Float32Array(pos.count * 2);
+    for (let r = 0; r < H; r++) {
+      for (let c = 0; c < W; c++) {
+        const [lon, lat] = cellLonLat(r, c);
+        const [tx, ty] = lonLatToTile(lon, lat, ZOOM);
+        const i = r * W + c;
+        uv[i * 2] = (tx - x0) * 256 / cv.width;
+        uv[i * 2 + 1] = 1 - (ty - y0) * 256 / cv.height;   // three.js: v นับจากล่าง
+      }
+    }
+    geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+
+    imageryTex = new THREE.CanvasTexture(cv);
+    imageryTex.colorSpace = THREE.SRGBColorSpace;
+    imageryTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    const ms = (performance.now() - t2).toFixed(0);
+    say("ภาพดาวเทียม", `z${ZOOM} · ${okN}/${nx * ny} tiles · ` +
+        `${cv.width}x${cv.height}px · ${ms}ms`, okN ? "ok" : "warn");
+  } catch (err) {
+    say("ภาพดาวเทียม", "ล้มเหลว: " + err.message, "bad");
+  }
+} else {
+  say("ภาพดาวเทียม", "ไม่มี tile proxy — ใช้สีไล่ตามความสูง", "warn");
+}
+
+// ระบายสีตามความสูง (ใช้เมื่อไม่มีภาพดาวเทียม)
+const colors = new Float32Array(pos.count * 3);
+const span = Math.max(1, mx - mn);
+const lo = new THREE.Color(0x1d3f2b), mid = new THREE.Color(0x6b7a3a), hi = new THREE.Color(0xd8d2c0);
+const tmp = new THREE.Color();
+for (let i = 0; i < pos.count; i++) {
+  const t = Math.min(1, Math.max(0, (heights[i] - mn) / span));
+  tmp.copy(t < 0.5 ? lo.clone().lerp(mid, t * 2) : mid.clone().lerp(hi, (t - 0.5) * 2));
+  colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
+}
+geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+// มีภาพดาวเทียม → ใช้ภาพ; ไม่มี → ตกไปใช้สีไล่ตามความสูง (ยังเห็นภูมิประเทศได้)
+const mesh = new THREE.Mesh(geo, imageryTex
+  ? new THREE.MeshLambertMaterial({ map: imageryTex })
+  : new THREE.MeshLambertMaterial({ vertexColors: true }));
+scene.add(mesh);
+scene.add(new THREE.HemisphereLight(0xbfd4e8, 0x2a2a20, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+sun.position.set(-1, 2, 1).multiplyScalar(CELL * W);
+scene.add(sun);
+
+// ── ขั้น 6: หมุดโดรน — จุดสำคัญของงาน GCS ────────────────────
+// วางที่พิกัด home ของ SITL แล้วเช็คว่ามันลอยเหนือภูมิประเทศจริง
+function sampleHeight(x, z) {
+  // local metres -> ดัชนีกริด (bilinear)
+  const fc = (x + (W - 1) * CELL / 2) / CELL;
+  const fr = (z + (H - 1) * CELL / 2) / CELL;
+  const c = Math.min(W - 2, Math.max(0, Math.floor(fc)));
+  const r = Math.min(H - 2, Math.max(0, Math.floor(fr)));
+  const tx = fc - c, tz = fr - r;
+  const h00 = heights[r * W + c], h10 = heights[r * W + c + 1];
+  const h01 = heights[(r + 1) * W + c], h11 = heights[(r + 1) * W + c + 1];
+  return (h00 * (1 - tx) + h10 * tx) * (1 - tz) + (h01 * (1 - tx) + h11 * tx) * tz;
+}
+// พิกัด home ของ SITL (นครราชสีมา) -> local metres ผ่าน bbox แบบง่าย
+// (prototype: ใช้ประมาณเชิงเส้นจาก bbox พอ ของจริงต้องใช้ UTM เหมือน SIAHRA)
+const HOME = { lat: 14.9581695, lon: 102.0986187 };
+const fx = (HOME.lon - B.minLon) / (B.maxLon - B.minLon);
+const fz = (B.maxLat - HOME.lat) / (B.maxLat - B.minLat);
+const hx = (fx - 0.5) * (W - 1) * CELL;
+const hz = (fz - 0.5) * (H - 1) * CELL;
+const ground = sampleHeight(hx, hz);
+const inBbox = fx >= 0 && fx <= 1 && fz >= 0 && fz <= 1;
+say("จุด home SITL", inBbox
+  ? `อยู่ในขอบเขต · พื้นสูง ${ground.toFixed(0)} m`
+  : "อยู่นอกขอบเขต AOI", inBbox ? "ok" : "bad");
+
+const AGL = 120;                            // ความสูงบินสมมติ (m เหนือพื้น)
+const drone = new THREE.Mesh(
+  new THREE.SphereGeometry(180, 16, 12),
+  new THREE.MeshBasicMaterial({ color: 0x38e08b }));
+drone.position.set(hx, ground + AGL, hz);
+scene.add(drone);
+// เส้นดิ่งลงพื้น — ช่วยให้อ่านตำแหน่งจริงบนภูมิประเทศได้ ไม่ใช่เดาจากมุมกล้อง
+const stem = new THREE.Line(
+  new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(hx, ground, hz), new THREE.Vector3(hx, ground + AGL, hz)]),
+  new THREE.LineBasicMaterial({ color: 0x38e08b }));
+scene.add(stem);
+// วงแหวนที่พื้น = จุด home มองเห็นได้แม้โดรนบินไกลออกไป
+const ring = new THREE.Mesh(
+  new THREE.RingGeometry(600, 800, 48),
+  new THREE.MeshBasicMaterial({ color: 0x38e08b, side: THREE.DoubleSide,
+                                transparent: true, opacity: 0.75 }));
+ring.rotation.x = -Math.PI / 2;
+ring.position.set(hx, ground + 25, hz);
+scene.add(ring);
+
+// จัดกล้องแบบมุมเฉียงใกล้จุดบิน (คล้ายมุมที่ GCS ใช้จริง) ไม่ใช่มองทั้งจังหวัด
+const DIST = 14000;                         // ~14 km จากจุด home
+camera.position.set(hx + DIST * 0.55, ground + DIST * 0.42, hz + DIST * 0.75);
+controls.target.set(hx, ground + AGL * 0.5, hz);
+controls.update();
+
+// ── ขั้น 7: วัด FPS จริง ──────────────────────────────────────
+const fpsEl = document.getElementById("fps");
+let frames = 0, last = performance.now(), reported = false, samples = [];
+function loop() {
+  requestAnimationFrame(loop);
+  drone.position.y = ground + 120 + Math.sin(performance.now() / 900) * 25;
+  controls.update();
+  renderer.render(scene, camera);
+  frames++;
+  const now = performance.now();
+  if (now - last >= 1000) {
+    const fps = frames * 1000 / (now - last);
+    fpsEl.textContent = fps.toFixed(0) + " fps";
+    fpsEl.style.color = fps >= 30 ? "#38e08b" : fps >= 15 ? "#eab308" : "#ef4444";
+    samples.push(fps);
+    frames = 0; last = now;
+    // รายงานหลังผ่านไป 5 วินาที (ข้ามเฟรมแรกที่ยังอุ่นเครื่อง)
+    if (samples.length === 5 && !reported) {
+      reported = true;
+      const avg = samples.slice(1).reduce((a, b) => a + b, 0) / (samples.length - 1);
+      say("fps เฉลี่ย", avg.toFixed(1), avg >= 30 ? "ok" : avg >= 15 ? "warn" : "bad");
+      done(avg >= 15 ? "PASS" : "SLOW");
+    }
+  }
+}
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+loop();
+}  // ปิด main()
+</script>
+</body>
+</html>

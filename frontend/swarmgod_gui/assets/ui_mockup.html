@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>SwarmGod — Cockpit Mockup</title>
+<style>
+  :root{
+    --bg:#05080a; --panel:#0a1014; --panel2:#0c151a; --line:#12303a;
+    --green:#00ff9c; --green-dim:#0a8f5e; --amber:#ffb000; --red:#ff3b3b;
+    --cyan:#22d3ee; --text:#c8f7e4; --dim:#4d6b66; --grid:#0e1a1f;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    background:
+      linear-gradient(rgba(0,255,156,.02) 1px, transparent 1px) 0 0/100% 3px,
+      radial-gradient(1200px 600px at 70% -10%, #06231c 0%, var(--bg) 60%);
+    color:var(--text);
+    font-family:"JetBrains Mono","Consolas","DejaVu Sans Mono",monospace;
+    font-size:12px; letter-spacing:.3px; overflow:hidden;
+  }
+  .app{display:grid; grid-template-rows:34px 1fr 22px; height:100vh;}
+  /* ── top bar ── */
+  .topbar{display:flex; align-items:center; gap:14px; padding:0 12px;
+    background:linear-gradient(90deg,#07110d,#040a08); border-bottom:1px solid var(--line);}
+  .brand{color:var(--green); font-weight:700; letter-spacing:3px; text-shadow:0 0 8px rgba(0,255,156,.5);}
+  .brand span{color:var(--dim); font-weight:400; letter-spacing:1px;}
+  .tsep{width:1px; height:16px; background:var(--line);}
+  .stat{color:var(--dim);} .stat b{color:var(--text); font-weight:500;}
+  .stat.ok b{color:var(--green);} .stat.warn b{color:var(--amber);}
+  .pill{margin-left:auto; padding:2px 10px; border:1px solid var(--green-dim);
+    color:var(--green); border-radius:2px; letter-spacing:2px; font-size:11px;
+    animation:pulse 2s infinite;}
+  @keyframes pulse{50%{box-shadow:0 0 10px rgba(0,255,156,.4);}}
+  /* ── main grid ── */
+  .main{display:grid; grid-template-columns:270px 1fr 250px; gap:1px; background:var(--line); overflow:hidden;}
+  .col{background:var(--panel); overflow:auto;}
+  .hd{padding:6px 10px; color:var(--dim); letter-spacing:2px; font-size:11px;
+    border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--panel2); z-index:2;}
+  .hd b{color:var(--green);}
+  /* ── fleet cards ── */
+  .card{margin:8px; border:1px solid var(--line); border-left:3px solid var(--green);
+    background:var(--panel2); padding:8px 10px;}
+  .card.armed{border-left-color:var(--amber);}
+  .card.off{border-left-color:#2a2a2a; opacity:.65;}
+  .card.rtl{border-left-color:#ff8800;}
+  .crow{display:flex; align-items:center; justify-content:space-between;}
+  .cname{color:var(--green); font-weight:700; letter-spacing:1px;}
+  .badge{font-size:9px; padding:1px 6px; border:1px solid; letter-spacing:1px;}
+  .b-fly{color:var(--cyan); border-color:var(--cyan);}
+  .b-arm{color:var(--amber); border-color:var(--amber);}
+  .b-rdy{color:var(--green); border-color:var(--green);}
+  .b-off{color:#666; border-color:#333;}
+  .b-rtl{color:#ff8800; border-color:#ff8800;}
+  .grid2{display:grid; grid-template-columns:auto 1fr auto 1fr; gap:2px 8px; margin-top:6px; font-size:11px;}
+  .k{color:var(--dim); font-size:9px; letter-spacing:1px;}
+  .v{color:var(--text);}
+  .bat{margin-top:6px; height:4px; background:#062018; border:1px solid var(--line);}
+  .bat>i{display:block; height:100%; background:var(--green);}
+  .bat.mid>i{background:var(--amber);} .bat.low>i{background:var(--red);}
+  .batline{display:flex; justify-content:space-between; margin-top:3px; font-size:10px;}
+  /* ── center map ── */
+  .map{position:relative; background:
+     linear-gradient(var(--grid) 1px,transparent 1px) 0 0/40px 40px,
+     linear-gradient(90deg,var(--grid) 1px,transparent 1px) 0 0/40px 40px,
+     radial-gradient(900px 500px at 50% 40%, #04140f, #030807);
+     height:100%; overflow:hidden;}
+  .maptop{position:absolute; top:8px; left:10px; right:10px; display:flex; gap:8px; z-index:3;}
+  .chip{background:rgba(4,20,15,.8); border:1px solid var(--line); color:var(--dim);
+    padding:2px 8px; font-size:10px; letter-spacing:1px;}
+  .chip b{color:var(--green);}
+  .drone{position:absolute; transform:translate(-50%,-50%); text-align:center;}
+  .dot{width:12px; height:12px; border:2px solid var(--green); background:rgba(0,255,156,.25);
+    border-radius:50%; margin:0 auto; box-shadow:0 0 10px rgba(0,255,156,.6);}
+  .dot.amber{border-color:var(--amber); background:rgba(255,176,0,.25); box-shadow:0 0 10px rgba(255,176,0,.6);}
+  .dot.cyan{border-color:var(--cyan); background:rgba(34,211,238,.25); box-shadow:0 0 10px rgba(34,211,238,.6);}
+  .dlbl{color:var(--green); font-size:9px; margin-top:2px; letter-spacing:1px; text-shadow:0 0 4px #000;}
+  .trail{position:absolute; border-top:1px dashed rgba(0,255,156,.4);}
+  .formline{position:absolute; height:1px; background:linear-gradient(90deg,transparent,var(--amber),transparent); opacity:.5;}
+  .sweep{position:absolute; top:50%; left:50%; width:260px; height:260px; margin:-130px 0 0 -130px;
+    border:1px solid rgba(0,255,156,.12); border-radius:50%;}
+  .sweep::after{content:""; position:absolute; inset:0; border-radius:50%;
+    background:conic-gradient(from 0deg, rgba(0,255,156,.18), transparent 25%); animation:radar 4s linear infinite;}
+  @keyframes radar{to{transform:rotate(360deg);}}
+  /* ── right command panel ── */
+  .sec{padding:8px 10px; border-bottom:1px solid var(--line);}
+  .sec .t{color:var(--dim); font-size:10px; letter-spacing:2px; margin-bottom:6px;}
+  .btnrow{display:grid; grid-template-columns:1fr 1fr; gap:5px;}
+  .btn{border:1px solid var(--green-dim); color:var(--green); background:transparent;
+    padding:7px 4px; font-family:inherit; font-size:11px; font-weight:700; letter-spacing:1px;
+    cursor:pointer; text-align:center;}
+  .btn:hover{background:rgba(0,255,156,.12); box-shadow:0 0 8px rgba(0,255,156,.3);}
+  .btn.amber{border-color:#7a5500; color:var(--amber);} .btn.amber:hover{background:rgba(255,176,0,.12);}
+  .btn.red{border-color:#7a1f1f; color:var(--red);} .btn.red:hover{background:rgba(255,59,59,.15);}
+  .btn.kill{grid-column:1/3; border:2px solid var(--red); color:var(--red); letter-spacing:3px;}
+  .pad{display:grid; grid-template-columns:repeat(3,1fr); gap:4px; margin-top:4px;}
+  .pk{border:1px solid var(--line); color:var(--text); background:var(--panel2); padding:8px 0;
+    text-align:center; font-size:12px; cursor:pointer;} .pk:hover{border-color:var(--green); color:var(--green);}
+  .pk.stop{color:var(--red); border-color:#7a1f1f;}
+  .num{color:var(--green); font-size:20px; font-weight:700; text-shadow:0 0 8px rgba(0,255,156,.4);}
+  .telem{display:grid; grid-template-columns:auto 1fr; gap:3px 8px; font-size:11px;}
+  /* ── bottom console ── */
+  .console{background:#04090b; border-top:1px solid var(--line); color:var(--green-dim);
+    font-size:11px; padding:3px 12px; white-space:nowrap; overflow:hidden;}
+  .console b{color:var(--green);} .console .w{color:var(--amber);} .console .e{color:var(--red);}
+  .statusbar{display:flex; align-items:center; gap:16px; padding:0 12px; background:#040a08;
+    border-top:1px solid var(--line); color:var(--dim); font-size:10px; letter-spacing:1px;}
+  .statusbar .g{color:var(--green);}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="topbar">
+    <div class="brand">◈ SWARM<span>GOD</span></div>
+    <div class="tsep"></div>
+    <div class="stat ok">CORE <b>ONLINE</b></div>
+    <div class="stat">mTLS <b style="color:var(--green)">✓</b></div>
+    <div class="stat">SIGN <b style="color:var(--green)">HMAC</b></div>
+    <div class="tsep"></div>
+    <div class="stat ok">FLEET <b>4/5</b></div>
+    <div class="stat warn">GEOFENCE <b>ARMED</b></div>
+    <div class="stat">ALT-LIM <b>120m</b></div>
+    <div class="pill">● LIVE 14:32:07</div>
+  </div>
+
+  <div class="main">
+    <!-- FLEET -->
+    <div class="col">
+      <div class="hd">▸ FLEET <b>[ 4 ONLINE ]</b></div>
+
+      <div class="card">
+        <div class="crow"><span class="cname">☰ UAV_1</span><span class="badge b-fly">FLYING</span></div>
+        <div class="grid2">
+          <span class="k">IP</span><span class="v">192.168.40.1</span><span class="k">MODE</span><span class="v">GUIDED</span>
+          <span class="k">ALT</span><span class="v">45.2m</span><span class="k">SAT</span><span class="v">14 · 3D</span>
+          <span class="k">SPD</span><span class="v">6.1 m/s</span><span class="k">HDG</span><span class="v">092°</span>
+        </div>
+        <div class="bat"><i style="width:87%"></i></div>
+        <div class="batline"><span style="color:var(--green)">16.4V</span><span style="color:var(--green)">87%</span></div>
+      </div>
+
+      <div class="card armed">
+        <div class="crow"><span class="cname">☰ UAV_2</span><span class="badge b-arm">ARMED</span></div>
+        <div class="grid2">
+          <span class="k">IP</span><span class="v">192.168.40.2</span><span class="k">MODE</span><span class="v">LOITER</span>
+          <span class="k">ALT</span><span class="v">0.4m</span><span class="k">SAT</span><span class="v">12 · 3D</span>
+          <span class="k">SPD</span><span class="v">0.0 m/s</span><span class="k">HDG</span><span class="v">271°</span>
+        </div>
+        <div class="bat mid"><i style="width:54%"></i></div>
+        <div class="batline"><span style="color:var(--amber)">15.1V</span><span style="color:var(--amber)">54%</span></div>
+      </div>
+
+      <div class="card">
+        <div class="crow"><span class="cname">☰ UAV_3</span><span class="badge b-fly">FLYING</span></div>
+        <div class="grid2">
+          <span class="k">IP</span><span class="v">192.168.40.3</span><span class="k">MODE</span><span class="v">GUIDED</span>
+          <span class="k">ALT</span><span class="v">44.9m</span><span class="k">SAT</span><span class="v">15 · 3D</span>
+          <span class="k">SPD</span><span class="v">5.9 m/s</span><span class="k">HDG</span><span class="v">090°</span>
+        </div>
+        <div class="bat"><i style="width:79%"></i></div>
+        <div class="batline"><span style="color:var(--green)">16.1V</span><span style="color:var(--green)">79%</span></div>
+      </div>
+
+      <div class="card rtl">
+        <div class="crow"><span class="cname">☰ UAV_4</span><span class="badge b-rtl">RTL</span></div>
+        <div class="grid2">
+          <span class="k">IP</span><span class="v">192.168.40.4</span><span class="k">MODE</span><span class="v">RTL</span>
+          <span class="k">ALT</span><span class="v">38.0m</span><span class="k">SAT</span><span class="v">13 · 3D</span>
+          <span class="k">SPD</span><span class="v">7.2 m/s</span><span class="k">HDG</span><span class="v">201°</span>
+        </div>
+        <div class="bat low"><i style="width:23%"></i></div>
+        <div class="batline"><span style="color:var(--red)">14.0V</span><span style="color:var(--red)">23% ⚠ LOW</span></div>
+      </div>
+
+      <div class="card off">
+        <div class="crow"><span class="cname">☰ UAV_5</span><span class="badge b-off">OFFLINE</span></div>
+        <div class="grid2">
+          <span class="k">IP</span><span class="v">192.168.40.5</span><span class="k">MODE</span><span class="v">--</span>
+          <span class="k">ALT</span><span class="v">--</span><span class="k">SAT</span><span class="v">--</span>
+          <span class="k">LINK</span><span class="v">no telemetry</span><span class="k">PORT</span><span class="v">5764</span>
+        </div>
+        <div class="bat"><i style="width:0%"></i></div>
+        <div class="batline"><span class="k">--</span><span class="k">RECONNECT…</span></div>
+      </div>
+    </div>
+
+    <!-- MAP -->
+    <div class="map">
+      <div class="maptop">
+        <div class="chip">GRID <b>UTM 48P</b></div>
+        <div class="chip">GCS <b>14.9581, 102.0986</b></div>
+        <div class="chip">FORMATION <b>WEDGE ▲</b></div>
+        <div class="chip">SEP-MIN <b>5m ✓</b></div>
+        <div class="chip" style="margin-left:auto">SAT · HYBRID · TOPO</div>
+      </div>
+      <div class="sweep"></div>
+      <div class="formline" style="top:40%; left:44%; width:120px; transform:rotate(25deg);"></div>
+      <div class="formline" style="top:47%; left:44%; width:120px; transform:rotate(-18deg);"></div>
+      <div class="trail" style="top:38%; left:30%; width:130px; transform:rotate(6deg);"></div>
+      <div class="drone" style="top:38%; left:50%;"><div class="dot"></div><div class="dlbl">UAV_1 ▲45m</div></div>
+      <div class="drone" style="top:52%; left:38%;"><div class="dot cyan"></div><div class="dlbl">UAV_3 ▲45m</div></div>
+      <div class="drone" style="top:55%; left:60%;"><div class="dot amber"></div><div class="dlbl">UAV_2 ●GND</div></div>
+      <div class="drone" style="top:68%; left:46%;"><div class="dot" style="border-color:#ff8800;background:rgba(255,136,0,.25);box-shadow:0 0 10px rgba(255,136,0,.6)"></div><div class="dlbl" style="color:#ff8800">UAV_4 ⌂RTL</div></div>
+      <div class="drone" style="top:74%; left:50%;"><div class="dot" style="border-color:#22d3ee;width:16px;height:16px;background:transparent"></div><div class="dlbl" style="color:var(--cyan)">◆ GCS/HOME</div></div>
+    </div>
+
+    <!-- COMMAND -->
+    <div class="col">
+      <div class="hd">▸ COMMAND <b>[ TGT: 1,3 ]</b></div>
+
+      <div class="sec">
+        <div class="t">TELEMETRY · UAV_1</div>
+        <div class="telem">
+          <span class="k">LAT</span><span class="v">14.958214</span>
+          <span class="k">LON</span><span class="v">102.098871</span>
+          <span class="k">ALT-REL</span><span class="v">45.2 m</span>
+          <span class="k">ALT-ABS</span><span class="v">248.7 m</span>
+          <span class="k">Vx/Vy/Vz</span><span class="v">5.9 / 1.2 / 0.0</span>
+          <span class="k">ROLL/PITCH</span><span class="v">2° / -4°</span>
+          <span class="k">DIST</span><span class="v">1.24 km</span>
+          <span class="k">T+FLIGHT</span><span class="v">00:04:12</span>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="t">FLIGHT</div>
+        <div class="btnrow">
+          <button class="btn">ARM</button>
+          <button class="btn amber">DISARM</button>
+          <button class="btn">TAKEOFF</button>
+          <button class="btn amber">LAND</button>
+          <button class="btn">RTL</button>
+          <button class="btn">HOLD</button>
+          <button class="btn kill">⚠ EMERGENCY KILL</button>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="t">ALTITUDE — <span class="num" style="font-size:14px">45.2m</span></div>
+        <div class="btnrow">
+          <button class="btn">ALT + </button>
+          <button class="btn red">ALT − </button>
+          <button class="btn">GO ALT</button>
+          <button class="btn">EQUALIZE</button>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="t">RC · MANUAL</div>
+        <div class="pad">
+          <div class="pk">↺</div><div class="pk">▲</div><div class="pk">↻</div>
+          <div class="pk">◀</div><div class="pk stop">■</div><div class="pk">▶</div>
+          <div class="pk">⤒</div><div class="pk">▼</div><div class="pk">⤓</div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="t">MODE</div>
+        <div class="btnrow">
+          <button class="btn">GUIDED</button><button class="btn">LOITER</button>
+          <button class="btn">STABILIZE</button><button class="btn">POSHOLD</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="console">
+    <b>14:32:06</b> [core] UAV_1 GOTO 14.9582,102.0988 alt=45 <b>ACK ACCEPTED</b> &nbsp;·&nbsp;
+    <b>14:32:05</b> [safety] UAV_4 batt 23% → <span class="w">FAILSAFE RTL engaged</span> &nbsp;·&nbsp;
+    <b>14:32:03</b> [swarm] formation WEDGE holding · sep=5.2m <span class="w">OK</span> &nbsp;·&nbsp;
+    <b>14:32:01</b> [core] UAV_5 <span class="e">link lost — reconnecting (2/5)</span>
+  </div>
+
+  <div class="statusbar">
+    <span>SwarmGod v0.1 · Phase 0</span>
+    <span>core <span class="g">127.0.0.1:50051</span></span>
+    <span>telemetry <span class="g">10 Hz</span></span>
+    <span>audit <span class="g">● recording</span></span>
+    <span style="margin-left:auto">CPU 4% · MEM 61MB · goroutines 23</span>
+  </div>
+</div>
+</body>
+</html>
