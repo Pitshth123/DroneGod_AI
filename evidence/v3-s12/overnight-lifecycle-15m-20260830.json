@@ -1,0 +1,1743 @@
+{
+  "acceptance": {
+    "completed_requested_duration": true,
+    "evidence_parseable": true,
+    "hard_failures": [],
+    "investigate": [],
+    "telemetry_required": true
+  },
+  "actual_duration_seconds": 900.2810000000172,
+  "aggregates": {
+    "core_os_threads": {
+      "delta": 0.0,
+      "end": 12.0,
+      "max": 12.0,
+      "mean": 12.0,
+      "min": 12.0,
+      "samples": 32,
+      "start": 12.0
+    },
+    "core_rss_bytes": {
+      "delta": 221184.0,
+      "end": 32190464.0,
+      "max": 32833536.0,
+      "mean": 32381696.0,
+      "min": 31969280.0,
+      "samples": 32,
+      "start": 31969280.0
+    },
+    "python_managed_threads": {
+      "delta": 0.0,
+      "end": 3.0,
+      "max": 3.0,
+      "mean": 3.0,
+      "min": 3.0,
+      "samples": 32,
+      "start": 3.0
+    },
+    "python_os_threads": {
+      "delta": -3.0,
+      "end": 13.0,
+      "max": 16.0,
+      "mean": 13.53125,
+      "min": 13.0,
+      "samples": 32,
+      "start": 16.0
+    },
+    "python_private_bytes": {
+      "delta": 1736704.0,
+      "end": 30105600.0,
+      "max": 30171136.0,
+      "mean": 29962496.0,
+      "min": 28368896.0,
+      "samples": 32,
+      "start": 28368896.0
+    },
+    "python_rss_bytes": {
+      "delta": 360448.0,
+      "end": 41631744.0,
+      "max": 42242048.0,
+      "mean": 42038656.0,
+      "min": 41271296.0,
+      "samples": 32,
+      "start": 41271296.0
+    },
+    "render_skip_percent": 39.9311340664223,
+    "render_skipped": 3595,
+    "render_total": 5408,
+    "rpc_latency_ms": {
+      "delta": -6.834800005890429,
+      "end": 0.47989998711273074,
+      "max": 14.232899993658066,
+      "mean": 6.154553272770109,
+      "min": 0.47989998711273074,
+      "samples": 107,
+      "start": 7.31469999300316
+    }
+  },
+  "authority_token_observed_locally": "core-single-wait",
+  "availability": {
+    "core_os_threads": true,
+    "core_rss": true,
+    "go_goroutines": "NOT CURRENTLY EXPOSED",
+    "native_grpc_threads_separate_from_process_threads": "NOT CURRENTLY EXPOSED",
+    "python_managed_threads": true,
+    "python_os_threads_including_native_grpc": true,
+    "python_private_bytes": true,
+    "python_rss": true,
+    "real_gui_frame_timing": "NOT CURRENTLY EXPOSED; presentation gate exercised"
+  },
+  "cleanup": {
+    "external_core_and_sitl_left_running": true,
+    "owned_client_closed": true,
+    "owned_stream_closed": true
+  },
+  "counters": {
+    "client_lifecycle_cycles": 75,
+    "mission_start_cancel_cycles": 0,
+    "mission_transitions": 0,
+    "reconnects": 0,
+    "rpc_calls": 107,
+    "rpc_errors": 0,
+    "stream_errors": 0,
+    "telemetry_per_drone": {
+      "1": 9003
+    },
+    "telemetry_total": 9003,
+    "ui_stalls": 0
+  },
+  "end_reason": "requested workload duration completed",
+  "errors": {
+    "rpc": [],
+    "stream": []
+  },
+  "file_growth": {
+    "database_delta_bytes": 0,
+    "database_end_bytes": 110592,
+    "database_path": "backend\\logs\\missionverify.db",
+    "database_start_bytes": 110592,
+    "log_delta_bytes": 741725,
+    "log_end_bytes": 6335085,
+    "log_path": "backend\\logs",
+    "log_start_bytes": 5593360
+  },
+  "generated_at": "2026-08-30T00:16:15.727671Z",
+  "participant_count": 1,
+  "processes": {
+    "core_or_sitl_processes_owned": false,
+    "core_pid": 40364,
+    "core_restart_or_crash_count": 0,
+    "owned_child_processes": [],
+    "recorder_pid": 35116
+  },
+  "profile": "sitl",
+  "requested_duration": "15m",
+  "requested_duration_seconds": 900.0,
+  "result": "PASS",
+  "sample_interval_seconds": 30.0,
+  "samples": [
+    {
+      "at_seconds": 0.031000000017229468,
+      "client_lifecycle_cycles": 0,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57245696,
+        "rss_bytes": 31969280
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "initial",
+      "presentation": {
+        "render_rate_hz": 4.901960783664736,
+        "render_skipped": 0,
+        "render_total": 0,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 0.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 212,
+        "os_threads": 16,
+        "private_bytes": 28368896,
+        "python_threads": 3,
+        "rss_bytes": 41271296
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 2,
+        "errors": 0,
+        "last_latency_ms": 0.7680999697186053
+      },
+      "telemetry": {
+        "ingest_rate_hz": 0.0,
+        "per_drone": {},
+        "receive_age_ms": {},
+        "source_age_ms": {},
+        "total": 0
+      },
+      "timestamp": "2026-08-30T00:01:15.487360Z"
+    },
+    {
+      "at_seconds": 30.06300000002375,
+      "client_lifecycle_cycles": 0,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57245696,
+        "rss_bytes": 31977472
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.024096385547583,
+        "render_skipped": 119,
+        "render_total": 181,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 16,
+        "private_bytes": 28372992,
+        "python_threads": 3,
+        "rss_bytes": 41336832
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 3,
+        "errors": 0,
+        "last_latency_ms": 0.950800022110343
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.994669509593797,
+        "per_drone": {
+          "1": 300
+        },
+        "receive_age_ms": {
+          "1": 62.999999965541065
+        },
+        "source_age_ms": {
+          "1": 0.9130859375
+        },
+        "total": 300
+      },
+      "timestamp": "2026-08-30T00:01:45.505194Z"
+    },
+    {
+      "at_seconds": 60.125,
+      "client_lifecycle_cycles": 5,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57540608,
+        "rss_bytes": 32440320
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.020689884570968,
+        "render_skipped": 239,
+        "render_total": 362,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1016.0000000032596,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 29847552,
+        "python_threads": 3,
+        "rss_bytes": 41803776
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 9,
+        "errors": 0,
+        "last_latency_ms": 0.5289000109769404
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.012640542866574,
+        "per_drone": {
+          "1": 601
+        },
+        "receive_age_ms": {
+          "1": 31.000000017229468
+        },
+        "source_age_ms": {
+          "1": 0.669921875
+        },
+        "total": 601
+      },
+      "timestamp": "2026-08-30T00:02:15.580226Z"
+    },
+    {
+      "at_seconds": 90.06300000002375,
+      "client_lifecycle_cycles": 5,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57540608,
+        "rss_bytes": 32440320
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 5.976029112279987,
+        "render_skipped": 359,
+        "render_total": 541,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 29847552,
+        "python_threads": 3,
+        "rss_bytes": 41807872
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 10,
+        "errors": 0,
+        "last_latency_ms": 0.8692999836057425
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.98730710135427,
+        "per_drone": {
+          "1": 900
+        },
+        "receive_age_ms": {
+          "1": 62.999999965541065
+        },
+        "source_age_ms": {
+          "1": 0.265380859375
+        },
+        "total": 900
+      },
+      "timestamp": "2026-08-30T00:02:45.514843Z"
+    },
+    {
+      "at_seconds": 120.125,
+      "client_lifecycle_cycles": 10,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57606144,
+        "rss_bytes": 32575488
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.020689884570968,
+        "render_skipped": 479,
+        "render_total": 722,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 29847552,
+        "python_threads": 3,
+        "rss_bytes": 41861120
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 16,
+        "errors": 0,
+        "last_latency_ms": 0.7033000001683831
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.017639032176083,
+        "per_drone": {
+          "1": 1201
+        },
+        "receive_age_ms": {
+          "1": 16.00000000325963
+        },
+        "source_age_ms": {
+          "1": 0.307861328125
+        },
+        "total": 1201
+      },
+      "timestamp": "2026-08-30T00:03:15.577706Z"
+    },
+    {
+      "at_seconds": 150.09400000004098,
+      "client_lifecycle_cycles": 10,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57344000,
+        "rss_bytes": 32382976
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 5.976029112279987,
+        "render_skipped": 599,
+        "render_total": 901,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1016.0000000032596,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 29847552,
+        "python_threads": 3,
+        "rss_bytes": 41861120
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 17,
+        "errors": 0,
+        "last_latency_ms": 0.985699996817857
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.982305612132492,
+        "per_drone": {
+          "1": 1500
+        },
+        "receive_age_ms": {
+          "1": 62.999999965541065
+        },
+        "source_age_ms": {
+          "1": 0.507568359375
+        },
+        "total": 1500
+      },
+      "timestamp": "2026-08-30T00:03:45.538777Z"
+    },
+    {
+      "at_seconds": 180.125,
+      "client_lifecycle_cycles": 15,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57884672,
+        "rss_bytes": 32833536
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.02389589642482,
+        "render_skipped": 718,
+        "render_total": 1083,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 29863936,
+        "python_threads": 3,
+        "rss_bytes": 41889792
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 23,
+        "errors": 0,
+        "last_latency_ms": 0.6747999577783048
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.017639032176083,
+        "per_drone": {
+          "1": 1801
+        },
+        "receive_age_ms": {
+          "1": 0.0
+        },
+        "source_age_ms": {
+          "1": 1.23779296875
+        },
+        "total": 1801
+      },
+      "timestamp": "2026-08-30T00:04:15.573310Z"
+    },
+    {
+      "at_seconds": 210.07800000003772,
+      "client_lifecycle_cycles": 15,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57368576,
+        "rss_bytes": 32407552
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.009414749778758,
+        "render_skipped": 838,
+        "render_total": 1262,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 983.9999999967404,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30015488,
+        "python_threads": 3,
+        "rss_bytes": 41959424
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 24,
+        "errors": 0,
+        "last_latency_ms": 0.8812000160105526
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.98764071217013,
+        "per_drone": {
+          "1": 2100
+        },
+        "receive_age_ms": {
+          "1": 46.999999962281436
+        },
+        "source_age_ms": {
+          "1": 0.162109375
+        },
+        "total": 2100
+      },
+      "timestamp": "2026-08-30T00:04:45.524206Z"
+    },
+    {
+      "at_seconds": 240.10899999999674,
+      "client_lifecycle_cycles": 20,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57401344,
+        "rss_bytes": 32489472
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.030318174243403,
+        "render_skipped": 958,
+        "render_total": 1443,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1016.0000000032596,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30052352,
+        "python_threads": 3,
+        "rss_bytes": 42045440
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 30,
+        "errors": 0,
+        "last_latency_ms": 0.521400012075901
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.012307487601444,
+        "per_drone": {
+          "1": 2401
+        },
+        "receive_age_ms": {
+          "1": 16.00000000325963
+        },
+        "source_age_ms": {
+          "1": 0.010498046875
+        },
+        "total": 2401
+      },
+      "timestamp": "2026-08-30T00:05:15.560089Z"
+    },
+    {
+      "at_seconds": 270.0780000000377,
+      "client_lifecycle_cycles": 20,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57401344,
+        "rss_bytes": 32489472
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 5.969651492415655,
+        "render_skipped": 1078,
+        "render_total": 1622,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30052352,
+        "python_threads": 3,
+        "rss_bytes": 42053632
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 31,
+        "errors": 0,
+        "last_latency_ms": 0.7870999979786575
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.977309129740558,
+        "per_drone": {
+          "1": 2700
+        },
+        "receive_age_ms": {
+          "1": 77.9999999795109
+        },
+        "source_age_ms": {
+          "1": 0.31884765625
+        },
+        "total": 2700
+      },
+      "timestamp": "2026-08-30T00:05:45.522952Z"
+    },
+    {
+      "at_seconds": 300.10899999999674,
+      "client_lifecycle_cycles": 25,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57204736,
+        "rss_bytes": 32292864
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.027105324494561,
+        "render_skipped": 1198,
+        "render_total": 1803,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 15,
+        "private_bytes": 30171136,
+        "python_threads": 3,
+        "rss_bytes": 42156032
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 37,
+        "errors": 0,
+        "last_latency_ms": 0.5610000225715339
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.027985074625777,
+        "per_drone": {
+          "1": 3001
+        },
+        "receive_age_ms": {
+          "1": 0.0
+        },
+        "source_age_ms": {
+          "1": 0.44921875
+        },
+        "total": 3001
+      },
+      "timestamp": "2026-08-30T00:06:15.553079Z"
+    },
+    {
+      "at_seconds": 330.0780000000377,
+      "client_lifecycle_cycles": 25,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57204736,
+        "rss_bytes": 32292864
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 5.979223035044995,
+        "render_skipped": 1318,
+        "render_total": 1982,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 984.9999999860302,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 15,
+        "private_bytes": 30171136,
+        "python_threads": 3,
+        "rss_bytes": 42172416
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 38,
+        "errors": 0,
+        "last_latency_ms": 1.0119000216946006
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.976976208754776,
+        "per_drone": {
+          "1": 3300
+        },
+        "receive_age_ms": {
+          "1": 62.999999965541065
+        },
+        "source_age_ms": {
+          "1": 0.805419921875
+        },
+        "total": 3300
+      },
+      "timestamp": "2026-08-30T00:06:45.525913Z"
+    },
+    {
+      "at_seconds": 360.094000000041,
+      "client_lifecycle_cycles": 30,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57638912,
+        "rss_bytes": 32653312
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 5.9936068193913465,
+        "render_skipped": 1438,
+        "render_total": 2162,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 15,
+        "private_bytes": 30171136,
+        "python_threads": 3,
+        "rss_bytes": 42176512
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 44,
+        "errors": 0,
+        "last_latency_ms": 0.5159999709576368
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.989677333416399,
+        "per_drone": {
+          "1": 3600
+        },
+        "receive_age_ms": {
+          "1": 93.99999998277053
+        },
+        "source_age_ms": {
+          "1": 0.647216796875
+        },
+        "total": 3600
+      },
+      "timestamp": "2026-08-30T00:07:15.542423Z"
+    },
+    {
+      "at_seconds": 390.0470000000205,
+      "client_lifecycle_cycles": 30,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57311232,
+        "rss_bytes": 32391168
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.003201707578027,
+        "render_skipped": 1558,
+        "render_total": 2342,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 983.9999999967404,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 15,
+        "private_bytes": 30171136,
+        "python_threads": 3,
+        "rss_bytes": 42176512
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 45,
+        "errors": 0,
+        "last_latency_ms": 1.0611999896354973
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.015691249631264,
+        "per_drone": {
+          "1": 3900
+        },
+        "receive_age_ms": {
+          "1": 46.999999962281436
+        },
+        "source_age_ms": {
+          "1": 0.2978515625
+        },
+        "total": 3900
+      },
+      "timestamp": "2026-08-30T00:07:45.494970Z"
+    },
+    {
+      "at_seconds": 420.125,
+      "client_lifecycle_cycles": 35,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57384960,
+        "rss_bytes": 32464896
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.020689884570968,
+        "render_skipped": 1678,
+        "render_total": 2523,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30105600,
+        "python_threads": 3,
+        "rss_bytes": 42168320
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 51,
+        "errors": 0,
+        "last_latency_ms": 0.4971000016666949
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.007314316098894,
+        "per_drone": {
+          "1": 4201
+        },
+        "receive_age_ms": {
+          "1": 31.000000017229468
+        },
+        "source_age_ms": {
+          "1": 0.7392578125
+        },
+        "total": 4201
+      },
+      "timestamp": "2026-08-30T00:08:15.580828Z"
+    },
+    {
+      "at_seconds": 450.0470000000205,
+      "client_lifecycle_cycles": 35,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57483264,
+        "rss_bytes": 32563200
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 5.985420985751919,
+        "render_skipped": 1798,
+        "render_total": 2702,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30105600,
+        "python_threads": 3,
+        "rss_bytes": 42168320
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 52,
+        "errors": 0,
+        "last_latency_ms": 0.7851999835111201
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.992647550310036,
+        "per_drone": {
+          "1": 4500
+        },
+        "receive_age_ms": {
+          "1": 46.999999962281436
+        },
+        "source_age_ms": {
+          "1": 0.22998046875
+        },
+        "total": 4500
+      },
+      "timestamp": "2026-08-30T00:08:45.498045Z"
+    },
+    {
+      "at_seconds": 480.10899999999674,
+      "client_lifecycle_cycles": 40,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57745408,
+        "rss_bytes": 32759808
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 5.9543609872976315,
+        "render_skipped": 1919,
+        "render_total": 2882,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1016.0000000032596,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30105600,
+        "python_threads": 3,
+        "rss_bytes": 42172416
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 58,
+        "errors": 0,
+        "last_latency_ms": 0.49319997197017074
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.012307487601444,
+        "per_drone": {
+          "1": 4801
+        },
+        "receive_age_ms": {
+          "1": 16.00000000325963
+        },
+        "source_age_ms": {
+          "1": 0.146240234375
+        },
+        "total": 4801
+      },
+      "timestamp": "2026-08-30T00:09:15.554848Z"
+    },
+    {
+      "at_seconds": 510.06300000002375,
+      "client_lifecycle_cycles": 40,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57253888,
+        "rss_bytes": 32346112
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.00620641329719,
+        "render_skipped": 2039,
+        "render_total": 3061,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1016.0000000032596,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30105600,
+        "python_threads": 3,
+        "rss_bytes": 42188800
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 59,
+        "errors": 0,
+        "last_latency_ms": 1.0112000163644552
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.982305612132492,
+        "per_drone": {
+          "1": 5100
+        },
+        "receive_age_ms": {
+          "1": 62.999999965541065
+        },
+        "source_age_ms": {
+          "1": 0.570556640625
+        },
+        "total": 5100
+      },
+      "timestamp": "2026-08-30T00:09:45.511644Z"
+    },
+    {
+      "at_seconds": 540.094000000041,
+      "client_lifecycle_cycles": 45,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57319424,
+        "rss_bytes": 32411648
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 5.996801705756279,
+        "render_skipped": 2159,
+        "render_total": 3241,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 968.9999999827705,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30105600,
+        "python_threads": 3,
+        "rss_bytes": 42188800
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 65,
+        "errors": 0,
+        "last_latency_ms": 0.5521000130102038
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.989677333416399,
+        "per_drone": {
+          "1": 5400
+        },
+        "receive_age_ms": {
+          "1": 93.99999998277053
+        },
+        "source_age_ms": {
+          "1": 0.927734375
+        },
+        "total": 5400
+      },
+      "timestamp": "2026-08-30T00:10:15.538712Z"
+    },
+    {
+      "at_seconds": 570.0630000000237,
+      "client_lifecycle_cycles": 45,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57499648,
+        "rss_bytes": 32587776
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.006406833957526,
+        "render_skipped": 2279,
+        "render_total": 3421,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1016.0000000032596,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30105600,
+        "python_threads": 3,
+        "rss_bytes": 42201088
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 66,
+        "errors": 0,
+        "last_latency_ms": 1.1012000031769276
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.010344022161982,
+        "per_drone": {
+          "1": 5700
+        },
+        "receive_age_ms": {
+          "1": 62.999999965541065
+        },
+        "source_age_ms": {
+          "1": 0.6630859375
+        },
+        "total": 5700
+      },
+      "timestamp": "2026-08-30T00:10:45.515485Z"
+    },
+    {
+      "at_seconds": 600.1089999999967,
+      "client_lifecycle_cycles": 50,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57319424,
+        "rss_bytes": 32411648
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 5.9270111880647764,
+        "render_skipped": 2401,
+        "render_total": 3599,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 14,
+        "private_bytes": 30138368,
+        "python_threads": 3,
+        "rss_bytes": 42233856
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 72,
+        "errors": 0,
+        "last_latency_ms": 0.49209996359422803
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.989677333416399,
+        "per_drone": {
+          "1": 6000
+        },
+        "receive_age_ms": {
+          "1": 93.99999998277053
+        },
+        "source_age_ms": {
+          "1": 0.58837890625
+        },
+        "total": 6000
+      },
+      "timestamp": "2026-08-30T00:11:15.554876Z"
+    },
+    {
+      "at_seconds": 630.0630000000237,
+      "client_lifecycle_cycles": 50,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57131008,
+        "rss_bytes": 32231424
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.039775760812846,
+        "render_skipped": 2520,
+        "render_total": 3780,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 14,
+        "private_bytes": 30138368,
+        "python_threads": 3,
+        "rss_bytes": 42233856
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 73,
+        "errors": 0,
+        "last_latency_ms": 1.228499982971698
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.010344022161982,
+        "per_drone": {
+          "1": 6300
+        },
+        "receive_age_ms": {
+          "1": 62.999999965541065
+        },
+        "source_age_ms": {
+          "1": 0.21533203125
+        },
+        "total": 6300
+      },
+      "timestamp": "2026-08-30T00:11:45.515303Z"
+    },
+    {
+      "at_seconds": 660.1089999999967,
+      "client_lifecycle_cycles": 55,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57163776,
+        "rss_bytes": 32268288
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.020689884570968,
+        "render_skipped": 2640,
+        "render_total": 3961,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1016.0000000032596,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 14,
+        "private_bytes": 30138368,
+        "python_threads": 3,
+        "rss_bytes": 42233856
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 79,
+        "errors": 0,
+        "last_latency_ms": 0.9348000166937709
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.017639032176083,
+        "per_drone": {
+          "1": 6601
+        },
+        "receive_age_ms": {
+          "1": 16.00000000325963
+        },
+        "source_age_ms": {
+          "1": 0.598876953125
+        },
+        "total": 6601
+      },
+      "timestamp": "2026-08-30T00:12:15.563879Z"
+    },
+    {
+      "at_seconds": 690.0780000000377,
+      "client_lifecycle_cycles": 55,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57221120,
+        "rss_bytes": 32325632
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.009414749778758,
+        "render_skipped": 2759,
+        "render_total": 4141,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30105600,
+        "python_threads": 3,
+        "rss_bytes": 42217472
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 80,
+        "errors": 0,
+        "last_latency_ms": 0.8555999957025051
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.982305612132492,
+        "per_drone": {
+          "1": 6900
+        },
+        "receive_age_ms": {
+          "1": 62.999999965541065
+        },
+        "source_age_ms": {
+          "1": 0.505126953125
+        },
+        "total": 6900
+      },
+      "timestamp": "2026-08-30T00:12:45.523724Z"
+    },
+    {
+      "at_seconds": 720.125,
+      "client_lifecycle_cycles": 60,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57032704,
+        "rss_bytes": 32124928
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.057177089222748,
+        "render_skipped": 2878,
+        "render_total": 4323,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1015.0000000139698,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30105600,
+        "python_threads": 3,
+        "rss_bytes": 42225664
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 86,
+        "errors": 0,
+        "last_latency_ms": 0.7236999808810651
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.012640542866574,
+        "per_drone": {
+          "1": 7201
+        },
+        "receive_age_ms": {
+          "1": 31.000000017229468
+        },
+        "source_age_ms": {
+          "1": 0.12890625
+        },
+        "total": 7201
+      },
+      "timestamp": "2026-08-30T00:13:15.572824Z"
+    },
+    {
+      "at_seconds": 750.0780000000377,
+      "client_lifecycle_cycles": 60,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57081856,
+        "rss_bytes": 32178176
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.009414749778758,
+        "render_skipped": 2997,
+        "render_total": 4503,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30105600,
+        "python_threads": 3,
+        "rss_bytes": 42225664
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 87,
+        "errors": 0,
+        "last_latency_ms": 1.1551000061444938
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.98730710135427,
+        "per_drone": {
+          "1": 7500
+        },
+        "receive_age_ms": {
+          "1": 62.999999965541065
+        },
+        "source_age_ms": {
+          "1": 0.227783203125
+        },
+        "total": 7500
+      },
+      "timestamp": "2026-08-30T00:13:45.528579Z"
+    },
+    {
+      "at_seconds": 780.125,
+      "client_lifecycle_cycles": 65,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57262080,
+        "rss_bytes": 32346112
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.020689884570968,
+        "render_skipped": 3117,
+        "render_total": 4684,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30105600,
+        "python_threads": 3,
+        "rss_bytes": 42229760
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 93,
+        "errors": 0,
+        "last_latency_ms": 0.5057999514974654
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.017639032176083,
+        "per_drone": {
+          "1": 7801
+        },
+        "receive_age_ms": {
+          "1": 16.00000000325963
+        },
+        "source_age_ms": {
+          "1": 0.479736328125
+        },
+        "total": 7801
+      },
+      "timestamp": "2026-08-30T00:14:15.578201Z"
+    },
+    {
+      "at_seconds": 810.0630000000237,
+      "client_lifecycle_cycles": 65,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57294848,
+        "rss_bytes": 32391168
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 5.982420373656013,
+        "render_skipped": 3237,
+        "render_total": 4863,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 983.9999999967404,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30105600,
+        "python_threads": 3,
+        "rss_bytes": 42229760
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 94,
+        "errors": 0,
+        "last_latency_ms": 0.7822999614290893
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.98764071217013,
+        "per_drone": {
+          "1": 8100
+        },
+        "receive_age_ms": {
+          "1": 46.999999962281436
+        },
+        "source_age_ms": {
+          "1": 0.189697265625
+        },
+        "total": 8100
+      },
+      "timestamp": "2026-08-30T00:14:45.508243Z"
+    },
+    {
+      "at_seconds": 840.1089999999967,
+      "client_lifecycle_cycles": 70,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57163776,
+        "rss_bytes": 32272384
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.020689884570968,
+        "render_skipped": 3357,
+        "render_total": 5044,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30105600,
+        "python_threads": 3,
+        "rss_bytes": 42242048
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 100,
+        "errors": 0,
+        "last_latency_ms": 0.6581000052392483
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.012307487601444,
+        "per_drone": {
+          "1": 8401
+        },
+        "receive_age_ms": {
+          "1": 16.00000000325963
+        },
+        "source_age_ms": {
+          "1": 0.31591796875
+        },
+        "total": 8401
+      },
+      "timestamp": "2026-08-30T00:15:15.564608Z"
+    },
+    {
+      "at_seconds": 870.0630000000237,
+      "client_lifecycle_cycles": 70,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57405440,
+        "rss_bytes": 32514048
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.009414749778758,
+        "render_skipped": 3476,
+        "render_total": 5224,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 984.9999999860302,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30105600,
+        "python_threads": 3,
+        "rss_bytes": 42242048
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 101,
+        "errors": 0,
+        "last_latency_ms": 1.0264000156894326
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.982305612132492,
+        "per_drone": {
+          "1": 8700
+        },
+        "receive_age_ms": {
+          "1": 62.999999965541065
+        },
+        "source_age_ms": {
+          "1": 0.590576171875
+        },
+        "total": 8700
+      },
+      "timestamp": "2026-08-30T00:15:45.512245Z"
+    },
+    {
+      "at_seconds": 900.1089999999967,
+      "client_lifecycle_cycles": 75,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57561088,
+        "rss_bytes": 32190464
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.093703173384004,
+        "render_skipped": 3594,
+        "render_total": 5406,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30105600,
+        "python_threads": 3,
+        "rss_bytes": 41631744
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 107,
+        "errors": 0,
+        "last_latency_ms": 0.47989998711273074
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.989677333416399,
+        "per_drone": {
+          "1": 9000
+        },
+        "receive_age_ms": {
+          "1": 93.99999998277053
+        },
+        "source_age_ms": {
+          "1": 0.442138671875
+        },
+        "total": 9000
+      },
+      "timestamp": "2026-08-30T00:16:15.557667Z"
+    },
+    {
+      "at_seconds": 900.219000000041,
+      "client_lifecycle_cycles": 75,
+      "core_process": {
+        "handles": 169,
+        "os_threads": 12,
+        "private_bytes": 57561088,
+        "rss_bytes": 32190464
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "final",
+      "presentation": {
+        "render_rate_hz": 0.0,
+        "render_skipped": 3594,
+        "render_total": 5408,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 214,
+        "os_threads": 13,
+        "private_bytes": 30105600,
+        "python_threads": 3,
+        "rss_bytes": 41631744
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 107,
+        "errors": 0,
+        "last_latency_ms": 0.47989998711273074
+      },
+      "telemetry": {
+        "ingest_rate_hz": 18.348623853759722,
+        "per_drone": {
+          "1": 9002
+        },
+        "receive_age_ms": {
+          "1": 0.0
+        },
+        "source_age_ms": {
+          "1": 0.72412109375
+        },
+        "total": 9002
+      },
+      "timestamp": "2026-08-30T00:16:15.674939Z"
+    }
+  ],
+  "scenario": "client-lifecycle",
+  "schema": "dronegod.v3.s12.endurance/v1",
+  "source": {
+    "git_branch": "ai-main",
+    "git_commit": "ffc278e99c228f1ee330585af4b5a251c4d2b8b3",
+    "workspace_dirty": true
+  },
+  "start_reason": "operator launched canonical S12 harness",
+  "started_at": "2026-08-30T00:01:15.305300Z"
+}

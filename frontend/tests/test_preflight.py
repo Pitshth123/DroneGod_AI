@@ -370,6 +370,25 @@ class TestPreflightDialog(unittest.TestCase):
         self.assertFalse(dlg.passed)
         self.assertIn("disarm", cl.kinds())     # ดับมอเตอร์กลับทันที
 
+    def test_live_commands_use_dispatcher_when_supplied(self):
+        cl = FakeClient()
+        seen = []
+
+        def dispatch(label, invoke, targets):
+            seen.append((label, tuple(targets)))
+            return invoke()
+
+        dlg = pfd.PreflightDialog(
+            None, client=cl, snapshot_fn=lambda: _snap(),
+            telem_fn=lambda d: cl._st(d), target_ids=[1], dispatch_fn=dispatch)
+        with mock.patch.object(pfd, "_confirm", return_value=True):
+            self._run(dlg)
+        labels = [label for label, _targets in seen]
+        self.assertIn("HOLD [preflight]", labels)
+        self.assertIn("MODE GUIDED [preflight]", labels)
+        self.assertTrue(all(targets == (1,) for _label, targets in seen))
+        self.assertTrue(dlg.passed)
+
     def test_bench_needs_props_off_confirmation(self):
         dlg, cl = self._dlg(bench=True)
         with mock.patch.object(pfd, "_confirm", return_value=False):

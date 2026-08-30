@@ -1,6 +1,10 @@
 package fleet
 
-import "testing"
+import (
+	"sync/atomic"
+	"testing"
+	"time"
+)
 
 // FailsafeActive ต้องรายงานสถานะ failsafe ที่ Core สั่ง RTL ไปแล้ว
 // (battery critical หรือ link lost) — swarm formation loop ใช้กันไม่ให้สั่งทับ (§9)
@@ -40,5 +44,55 @@ func TestFailsafeActiveIgnoresLinkWarn(t *testing.T) {
 	m.fsMu.Unlock()
 	if m.FailsafeActive(3) {
 		t.Fatal("link warn (1) ยังไม่ใช่ failsafe RTL — ต้องคืน false")
+	}
+}
+
+func TestDoIfFailsafeInactiveMakesLatchAndFinalWriteAtomic(t *testing.T) {
+	m := newTestManager(t, newFakeReg())
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	var writes atomic.Int32
+	go func() {
+		done <- m.DoIfFailsafeInactive(3, func() error {
+			close(started)
+			<-release
+			writes.Add(1)
+			return nil
+		})
+	}()
+	<-started
+
+	latched := make(chan struct{})
+	go func() {
+		m.fsMu.Lock()
+		m.fsBatt[3] = true
+		m.fsMu.Unlock()
+		close(latched)
+	}()
+	select {
+	case <-latched:
+		t.Fatal("failsafe latch crossed a transport write already inside the atomic boundary")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("write that began before the latch should finish: %v", err)
+	}
+	select {
+	case <-latched:
+	case <-time.After(time.Second):
+		t.Fatal("failsafe latch did not establish after the prior write finished")
+	}
+
+	called := false
+	if err := m.DoIfFailsafeInactive(3, func() error {
+		called = true
+		return nil
+	}); err == nil || called {
+		t.Fatalf("write after failsafe latch escaped: err=%v called=%v", err, called)
+	}
+	if got := writes.Load(); got != 1 {
+		t.Fatalf("transport writes=%d, want exactly the pre-latch write", got)
 	}
 }

@@ -21,6 +21,9 @@ logs/
 # backend/gen/ = generated protobuf — commit ไว้เพื่อให้ clone มา build ได้เลย (ไม่ต้องมี protoc)
 *.exe
 backend/bin/
+# workspace-local Go build cache (GOCACHE) — ห้าม commit (ไฟล์เยอะมากและเป็นของชั่วคราว)
+.tmp-gocache/
+backend/.tmp-gocache/
 
 # ── Python ──
 # frontend gen stubs = commit ไว้เพื่อ run ได้เลย (เหมือนฝั่ง Go)

@@ -308,6 +308,35 @@ func (m *Manager) FailsafeActive(id uint32) bool {
 	return m.fsBatt[id] || m.fsLink[id] >= 2
 }
 
+// DoIfFailsafeInactive makes the failsafe-latch check atomic with the final
+// transport write. A write that already entered this boundary may finish before
+// the latch is established; once the latch is established, every later caller
+// is refused. The callback must contain only the short transport write and must
+// not wait for an FC ACK.
+func (m *Manager) DoIfFailsafeInactive(id uint32, send func() error) error {
+	m.fsMu.Lock()
+	defer m.fsMu.Unlock()
+	if m.fsBatt[id] || m.fsLink[id] >= 2 {
+		return fmt.Errorf("failsafe active for Drone %d", id)
+	}
+	return send()
+}
+
+// WithFailsafeSendGuard adds the fleet failsafe latch as an atomic final-write
+// boundary while preserving any mission/operator SendGuard already attached to
+// the context. The guard is entered separately for every transport write, so a
+// failsafe that latches between HOLD stages blocks the next stale write. ACK
+// waits remain outside fsMu because guardedSend releases the guard immediately
+// after conn.Send returns.
+func (m *Manager) WithFailsafeSendGuard(ctx context.Context, id uint32) context.Context {
+	if m == nil {
+		return ctx
+	}
+	return WithAdditionalSendGuard(ctx, sendGuardFunc(func(send func() error) error {
+		return m.DoIfFailsafeInactive(id, send)
+	}))
+}
+
 // Snapshot คืน telemetry ทุกลำ
 func (m *Manager) Snapshot() []*pb.Telemetry {
 	m.mu.RLock()

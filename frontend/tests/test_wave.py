@@ -1,5 +1,6 @@
 import os
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -14,6 +15,23 @@ from tests.test_ui_selection import FakeClient, _fake_telem, _pump  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 _CONFIRM = "swarmgod_gui.widgets.confirm.confirm"
+
+
+def _pump_until(predicate, timeout=2.5):
+    """Process Qt events until an async test condition is true or timeout expires.
+
+    WAVE deliberately staggers multi-drone GOTO by 150 ms and schedules the next
+    group one second later.  Fixed sleeps made the full 1000+ test suite flaky on
+    a loaded Windows scheduler even though isolated behavior was correct.
+    """
+    end = time.monotonic() + float(timeout)
+    while time.monotonic() < end:
+        _app.processEvents()
+        if predicate():
+            return True
+        time.sleep(0.02)
+    _app.processEvents()
+    return bool(predicate())
 
 
 class WaveBase(unittest.TestCase):
@@ -59,7 +77,14 @@ class WaveBase(unittest.TestCase):
         self.enable_two_groups()
         with mock.patch(_CONFIRM, return_value=True):
             self.win._wp_execute()
-        _pump(0.25)
+        # Wait for the deliberately staggered D1/D2 first waypoint dispatch.
+        # This preserves production timing and removes dependence on Windows
+        # scheduler load in the full suite.
+        _pump_until(
+            lambda: {c[1] for c in self.fake.calls if c[0] == "goto"} >= {1, 2}
+            or not self.win._wave_executing,
+            timeout=2.0,
+        )
 
 
 class TestWaveSequence(WaveBase):
@@ -76,6 +101,41 @@ class TestWaveSequence(WaveBase):
         self.assertEqual(goto_ids, {1, 2})
         self.assertTrue(self.win._wave_executing)
 
+    def test_core_token_wave_keeps_legacy_executor_when_core_slot_idle(self):
+        with mock.patch.dict(os.environ, {"SWARMGOD_MISSION_AUTHORITY": "core-single-wait"}):
+            self.fake.get_mission_state = lambda: types.SimpleNamespace(
+                active=False, authority_active=False)
+            self.start_wave()
+        goto_ids = {c[1] for c in self.fake.calls if c[0] == "goto"}
+        self.assertEqual(goto_ids, {1, 2})
+        self.assertTrue(self.win._wave_executing)
+
+    def test_core_token_wave_blocks_when_core_authority_run_active(self):
+        with mock.patch.dict(os.environ, {"SWARMGOD_MISSION_AUTHORITY": "core-single-wait"}):
+            self.fake.get_mission_state = lambda: types.SimpleNamespace(
+                active=True, authority_active=True, run_id=900, plan_id="existing")
+            self.enable_two_groups()
+            # Call the central executor directly: Field Tablet uses this path,
+            # so the no-overlap guard must not live only in _wp_execute().
+            with mock.patch(_CONFIRM, return_value=True):
+                ok = self.win._wave_execute(auto=True)
+            _pump(0.2)
+        self.assertFalse(ok)
+        self.assertFalse(self.win._wave_executing)
+        self.assertFalse(any(c[0] == "goto" for c in self.fake.calls))
+
+    def test_core_token_wave_blocks_when_core_slot_query_fails(self):
+        def fail_query():
+            raise RuntimeError("Core query unavailable")
+        with mock.patch.dict(os.environ, {"SWARMGOD_MISSION_AUTHORITY": "core-single-wait"}):
+            self.fake.get_mission_state = fail_query
+            self.enable_two_groups()
+            with mock.patch(_CONFIRM, return_value=True):
+                self.win._wp_execute()
+            _pump(0.2)
+        self.assertFalse(self.win._wave_executing)
+        self.assertFalse(any(c[0] == "goto" for c in self.fake.calls))
+
     def test_group_two_waits_until_first_group_disarmed(self):
         self.start_wave()
         self.win._wave_route_finished()
@@ -87,6 +147,23 @@ class TestWaveSequence(WaveBase):
         self.win._wave_tick()
         _pump(1.15)
         self.assertEqual(self.win._wave_group_index, 1)
+
+    def test_core_run_appearing_between_groups_stops_wave_before_next_group(self):
+        state = {"active": False}
+        self.fake.get_mission_state = lambda: types.SimpleNamespace(
+            active=state["active"], authority_active=state["active"],
+            run_id=910 if state["active"] else 0)
+        with mock.patch.dict(os.environ, {"SWARMGOD_MISSION_AUTHORITY": "core-single-wait"}):
+            self.start_wave()
+            self.win._wave_route_finished()
+            for did in (1, 2):
+                self.win._last_telem[did].armed = False
+            state["active"] = True
+            self.win._wave_tick()
+            _pump(1.2)
+        self.assertFalse(self.win._wave_executing)
+        self.assertFalse(any(c[0] == "goto" and c[1] in (3, 4) for c in self.fake.calls),
+                         "a new Core run must block the next legacy WAVE group")
 
     def test_cancel_prevents_next_group(self):
         self.start_wave()
@@ -283,13 +360,16 @@ class TestRouteAutoTakeoff(WaveBase):
         self._ground(1, 2, 3, 4)
         self.win._wave_tick()  # กลุ่มแรกลงแล้ว → นัดเริ่มกลุ่ม 2
         with mock.patch(_CONFIRM, return_value=True) as confirm:
-            _pump(1.2)
+            _pump_until(lambda: confirm.called, timeout=2.5)
         self.assertTrue(confirm.called)
         self.assertTrue(any(c[0] == "takeoff" and 3 in c[1] for c in self.fake.calls))
         self.assertFalse(any(c[0] == "goto" and c[1] in (3, 4) for c in self.fake.calls))
 
         self._airborne(3, 4)
-        _pump(0.85)
+        _pump_until(
+            lambda: any(c[0] == "goto" and c[1] in (3, 4) for c in self.fake.calls),
+            timeout=2.0,
+        )
         self.assertTrue(any(c[0] == "goto" and c[1] in (3, 4) for c in self.fake.calls))
 
 

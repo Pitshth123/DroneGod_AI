@@ -39,6 +39,33 @@ enum MissionRunState {
   MISSION_STATE_COMPLETED = 9;
 }
 
+// Normal post-mission ownership policy. This is deliberately distinct from
+// failsafe/operator RTL and from the legacy compatibility bool.
+enum MissionReturnPolicy {
+  MISSION_RETURN_POLICY_UNSPECIFIED = 0;
+  MISSION_RETURN_POLICY_NONE = 1;
+  MISSION_RETURN_POLICY_RTL_ALL_AFTER_MISSION = 2;
+  MISSION_RETURN_POLICY_SWARM_RETURN = 3;
+  MISSION_RETURN_POLICY_WAVE_MANAGED_RETURN = 4;
+}
+
+enum MissionSeparateReturnTiming {
+  MISSION_SEPARATE_RETURN_TIMING_UNSPECIFIED = 0;
+  MISSION_SEPARATE_RETURN_ALL_ON_MISSION_COMPLETE = 1;
+  // Reserved for a later return-corridor safety contract. Core rejects it.
+  MISSION_SEPARATE_RETURN_EACH_ON_ROUTE_COMPLETE = 2;
+}
+
+enum MissionReturnState {
+  MISSION_RETURN_STATE_INACTIVE = 0;
+  MISSION_RETURN_STATE_PENDING = 1;
+  MISSION_RETURN_STATE_RETURNING = 2;
+  MISSION_RETURN_STATE_COMPLETED = 3;
+  MISSION_RETURN_STATE_SUPPRESSED = 4;
+  MISSION_RETURN_STATE_FAILED = 5;
+  MISSION_RETURN_STATE_RECOVERY_REQUIRED = 6;
+}
+
 message MissionWaypoint {
   int32 seq = 1;
   double lat = 2;
@@ -61,6 +88,9 @@ message MissionPlan {
   uint32 leader_id = 5;           // SWARM_LEADER only
   double arrival_radius_m = 6;    // 0 = default 3.0m (ย้ายจาก map.html TGT_REACH_M)
   bool rtl_after = 7;
+  map<uint32, double> participant_altitudes = 8; // frozen per-drone mission altitude (GROUPED compatibility)
+  MissionReturnPolicy return_policy = 9; // UNSPECIFIED maps rtl_after compatibly
+  MissionSeparateReturnTiming separate_return_timing = 10;
 }
 
 message StartMissionRequest {
@@ -73,6 +103,7 @@ message StartMissionResponse {
   string message = 2;
   uint64 run_id = 3;              // Core-generated run identity
   MissionRunState state = 4;
+  bool authority_active = 5;      // true only when this run's GOTO owner is Go Core
 }
 
 message CancelMissionRequest {
@@ -89,6 +120,13 @@ message MissionWait {
   int32 total_s = 4;
 }
 
+message MissionParticipantRejection {
+  uint64 run_id = 1;
+  int32 waypoint_index = 2;
+  uint32 drone_id = 3;
+  string reason = 4;
+}
+
 message MissionStateResponse {
   bool active = 1;
   uint64 run_id = 2;
@@ -103,4 +141,34 @@ message MissionStateResponse {
   repeated MissionWait waits = 11;
   string last_transition = 12;
   string terminal_reason = 13;
+  bool authority_active = 14;     // true only while Go Core owns waypoint GOTO for this run
+  MissionPlan plan = 15;          // frozen plan snapshot for restartable cockpit rebuild
+  repeated MissionParticipantRejection participant_rejections = 16;
+
+  // V3-S10 durable restart evidence. recovery_required is command-inert:
+  // active/authority_active MUST both be false until explicit operator clear.
+  bool recovery_required = 17;
+  MissionRunState recovery_previous_state = 18;
+  string recovery_reason = 19;
+  uint32 persistence_schema_version = 20;
+  uint64 persisted_revision = 21;
+  string authority_scope = 22;
+  string origin_session_id = 23;
+  string core_session_id = 24;
+  bool persistence_compatible = 25;
+  string persistence_fault = 26;
+  string operation_id = 27;
+  MissionReturnPolicy resolved_return_policy = 28;
+  MissionReturnState return_state = 29;
+  repeated uint32 return_participants = 30;
+  string return_reason = 31;
+
+  // V3-S09-C current in-run SWARM_LEADER ownership. plan.leader_id and
+  // participants remain the immutable original operator plan.
+  uint32 current_leader_id = 32;
+  repeated uint32 active_participants = 33;
+  repeated uint32 excluded_participants = 34;
+  string succession_reason = 35;
+  uint64 swarm_generation = 36;
+  bool succession_pending = 37;
 }

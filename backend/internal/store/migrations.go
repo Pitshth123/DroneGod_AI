@@ -92,6 +92,35 @@ ALTER TABLE audit_index ADD COLUMN request_id TEXT;
 CREATE INDEX idx_audit_reqid ON audit_index(request_id);
 `,
 	},
+	{
+		version: 3,
+		name:    "mission_persistence_s10",
+		sql: `
+CREATE TABLE mission_run_sequence (
+    singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+    last_run_id  INTEGER NOT NULL CHECK(last_run_id >= 0)
+);
+INSERT INTO mission_run_sequence(singleton_id, last_run_id) VALUES(1, 0);
+
+CREATE TABLE mission_state (
+    singleton_id   INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+    schema_version INTEGER NOT NULL,
+    run_id         INTEGER NOT NULL CHECK(run_id > 0),
+    revision       INTEGER NOT NULL CHECK(revision > 0),
+    record_json    BLOB    NOT NULL,
+    checksum       TEXT    NOT NULL,
+    updated_at     TEXT    NOT NULL
+);
+
+CREATE TABLE mission_operations (
+    operation_id TEXT PRIMARY KEY,
+    run_id       INTEGER NOT NULL CHECK(run_id > 0),
+    plan_id      TEXT    NOT NULL,
+    created_at   TEXT    NOT NULL
+);
+CREATE INDEX idx_mission_operations_run ON mission_operations(run_id);
+`,
+	},
 }
 
 // migrate รัน migration ที่ยังไม่ถูก apply (idempotent — รันซ้ำได้ไม่พัง)

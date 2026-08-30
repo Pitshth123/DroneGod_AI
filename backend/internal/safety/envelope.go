@@ -22,7 +22,9 @@ type DroneState struct {
 	Armed           bool
 	Mode            string
 	Heading         float64
-	TelemetryAgeSec float64 // -1 = ยังไม่เคยได้ telemetry
+	TelemetryAgeSec float64 // -1 = ยังไม่เคยได้ MAVLink message ใด ๆ
+	PositionAgeSec  float64 // -1 = ยังไม่เคยได้ GLOBAL_POSITION_INT
+	GpsAgeSec       float64 // -1 = ยังไม่เคยได้ GPS_RAW_INT
 }
 
 // Decision = ผลการตรวจ 1 คำสั่ง

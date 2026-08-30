@@ -40,6 +40,29 @@ func mustStart(t *testing.T, e *Engine, p MissionPlan) uint64 {
 	return id
 }
 
+type commandedGoto struct {
+	id       uint32
+	lat, lon float64
+	alt      float64
+}
+
+type fakeCommander struct {
+	calls     []commandedGoto
+	holdCalls []uint32
+	err       error
+	holdErr   error
+}
+
+func (f *fakeCommander) Goto(id uint32, lat, lon, alt float64) error {
+	f.calls = append(f.calls, commandedGoto{id: id, lat: lat, lon: lon, alt: alt})
+	return f.err
+}
+
+func (f *fakeCommander) Hold(id uint32) error {
+	f.holdCalls = append(f.holdCalls, id)
+	return f.holdErr
+}
+
 // ---- lifecycle ------------------------------------------------------------
 
 func TestStartRunsAndSnapshots(t *testing.T) {
@@ -84,6 +107,70 @@ func TestStartSecondDifferentPlanRejected(t *testing.T) {
 	other.PlanID = "p2"
 	if _, err := e.Start(other); !errors.Is(err, ErrActiveRun) {
 		t.Fatalf("second plan while active should reject with ErrActiveRun, got %v", err)
+	}
+}
+
+func TestAuthorityDispatchesInitialAndNextGotoExactlyOnce(t *testing.T) {
+	e := NewEngine(nil)
+	e.EnableAuthority()
+	p := groupedPlan([]Waypoint{
+		{Seq: 0, Lat: 14.0, Lon: 100.0, Alt: 20},
+		{Seq: 1, Lat: 14.001, Lon: 100.0, Alt: 21},
+	}, 7)
+	p.ParticipantAltitudes = map[uint32]float64{7: 27.5}
+	id, err := e.StartOp(p, "authority-op")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, ok, err := e.ClaimAuthorityGoto()
+	if err != nil || !ok || first.DroneID != 7 || first.Lat != 14.0 || first.Alt != 27.5 {
+		t.Fatalf("initial authority intent = %+v ok=%v err=%v", first, ok, err)
+	}
+	if gotID, err := e.StartOp(p, "authority-op"); err != nil || gotID != id {
+		t.Fatalf("duplicate authority Start: id=%d err=%v", gotID, err)
+	}
+	if _, ok, err := e.ClaimAuthorityGoto(); err != nil || ok {
+		t.Fatalf("duplicate Start must not duplicate GOTO intent: ok=%v err=%v", ok, err)
+	}
+	e.Observe(7, 14.0, 100.0, 27.5)
+	second, ok, err := e.ClaimAuthorityGoto()
+	if err != nil || !ok || second.Index != 1 || second.Lat != 14.001 || second.Alt != 27.5 {
+		t.Fatalf("next authority intent = %+v ok=%v err=%v", second, ok, err)
+	}
+}
+
+func TestAuthorityRejectFailsMissionAndNeverRetries(t *testing.T) {
+	e := NewEngine(nil)
+	e.EnableAuthority()
+	p := groupedPlan([]Waypoint{{Seq: 0, Lat: 14, Lon: 100, Alt: 20}}, 1)
+	id, err := e.StartOp(p, "reject-op")
+	if err != nil || id == 0 {
+		t.Fatalf("run start: id=%d err=%v", id, err)
+	}
+	if _, ok, err := e.ClaimAuthorityGoto(); err != nil || !ok {
+		t.Fatalf("expected one GOTO intent before simulated reject: ok=%v err=%v", ok, err)
+	}
+	e.Fail(id, "safety rejected")
+	s := e.Snapshot()
+	if s.State != StateFailed || s.Active {
+		t.Fatalf("command reject must terminally FAIL mission: %+v", s)
+	}
+	e.Observe(1, 14, 100, 20)
+	e.Poll()
+	if _, ok, err := e.ClaimAuthorityGoto(); err != nil || ok || e.Snapshot().State != StateFailed {
+		t.Fatalf("failed authority mission must never emit another command: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestAuthorityRefusesIneligiblePlanBeforeCommand(t *testing.T) {
+	e := NewEngine(nil)
+	e.EnableAuthority()
+	p := groupedPlan([]Waypoint{wpA}, 1, 2)
+	if _, err := e.StartOp(p, "bad-authority"); !errors.Is(err, ErrAuthorityUnsupported) {
+		t.Fatalf("want ErrAuthorityUnsupported, got %v", err)
+	}
+	if e.Snapshot().Active {
+		t.Fatal("ineligible authority plan must create no run")
 	}
 }
 
@@ -170,6 +257,81 @@ func TestGroupedWaitHoldsThenAdvances(t *testing.T) {
 	}
 	if s := e.Snapshot(); s.State != StateRunning || s.CurrentIndex != 1 || len(s.Waits) != 0 {
 		t.Fatalf("after WAIT should run to WP1: %+v", s)
+	}
+}
+
+func TestAuthorityWaitSendsHoldThenNextGoto(t *testing.T) {
+	clk := newClock()
+	e := NewEngine(clk.now)
+	e.EnableWaitAuthority()
+	wpWait := Waypoint{Seq: 0, Lat: 14.0, Lon: 100.0, Alt: 20, WaitSeconds: 30}
+	wpNext := Waypoint{Seq: 1, Lat: 14.001, Lon: 100.0, Alt: 20}
+	mustStart(t, e, groupedPlan([]Waypoint{wpWait, wpNext}, 1))
+	if _, ok, err := e.ClaimAuthorityGoto(); err != nil || !ok {
+		t.Fatalf("start should expose WP0 GOTO: ok=%v err=%v", ok, err)
+	}
+	e.Observe(1, wpWait.Lat, wpWait.Lon, 20)
+	if s := e.Snapshot(); s.State != StateWaiting || len(s.Waits) != 1 {
+		t.Fatalf("authority arrival should enter WAITING: %+v", s)
+	}
+	hold, ok, err := e.ClaimAuthorityHold()
+	if err != nil || !ok || hold.DroneID != 1 || hold.Index != 0 {
+		t.Fatalf("WAIT must expose one HOLD intent: %+v ok=%v err=%v", hold, ok, err)
+	}
+	if _, ok, err := e.ClaimAuthorityHold(); err != nil || ok {
+		t.Fatalf("same WAIT must not expose duplicate HOLD: ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := e.ClaimAuthorityGoto(); err != nil || ok {
+		t.Fatalf("WAIT entry must not expose next GOTO early: ok=%v err=%v", ok, err)
+	}
+	clk.advance(31 * time.Second)
+	if !e.Poll() {
+		t.Fatal("WAIT deadline should advance")
+	}
+	next, ok, err := e.ClaimAuthorityGoto()
+	if err != nil || !ok || next.Index != 1 {
+		t.Fatalf("WAIT completion must expose next GOTO once: %+v ok=%v err=%v", next, ok, err)
+	}
+	if s := e.Snapshot(); s.State != StateRunning || s.CurrentIndex != 1 {
+		t.Fatalf("after WAIT should run WP1: %+v", s)
+	}
+}
+
+func TestAuthorityWaitHoldRejectFailsClosed(t *testing.T) {
+	e := NewEngine(nil)
+	e.EnableWaitAuthority()
+	wpWait := Waypoint{Seq: 0, Lat: 14, Lon: 100, Alt: 20, WaitSeconds: 30}
+	runID := mustStart(t, e, groupedPlan([]Waypoint{wpWait, wpB}, 1))
+	_, _, _ = e.ClaimAuthorityGoto()
+	e.Observe(1, wpWait.Lat, wpWait.Lon, 20)
+	if _, ok, err := e.ClaimAuthorityHold(); err != nil || !ok {
+		t.Fatalf("expected HOLD intent before simulated reject: ok=%v err=%v", ok, err)
+	}
+	e.Fail(runID, "hold safety rejected")
+	if s := e.Snapshot(); s.State != StateFailed || len(s.Waits) != 0 {
+		t.Fatalf("HOLD reject must fail closed and clear WAIT: %+v", s)
+	}
+	if _, ok, err := e.ClaimAuthorityGoto(); err != nil || ok {
+		t.Fatalf("failed WAIT must not expose GOTO: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestAuthorityCancelDuringWaitPreventsPostCancelGoto(t *testing.T) {
+	clk := newClock()
+	e := NewEngine(clk.now)
+	e.EnableWaitAuthority()
+	wpWait := Waypoint{Seq: 0, Lat: 14, Lon: 100, Alt: 20, WaitSeconds: 30}
+	runID := mustStart(t, e, groupedPlan([]Waypoint{wpWait, wpB}, 1))
+	_, _, _ = e.ClaimAuthorityGoto()
+	e.Observe(1, wpWait.Lat, wpWait.Lon, 20)
+	_ = e.Cancel(runID)
+	clk.advance(time.Minute)
+	e.Poll()
+	if _, ok, err := e.ClaimAuthorityHold(); err != nil || ok {
+		t.Fatalf("cancel during WAIT must suppress late HOLD: ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := e.ClaimAuthorityGoto(); err != nil || ok || e.Snapshot().State != StateCancelled {
+		t.Fatalf("cancel during WAIT must suppress later GOTO: ok=%v err=%v state=%s", ok, err, e.Snapshot().State)
 	}
 }
 

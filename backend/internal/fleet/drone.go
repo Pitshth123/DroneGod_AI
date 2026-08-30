@@ -23,6 +23,83 @@ type sender interface {
 	Send(message.Message) error
 }
 
+// SendGuard serializes the final FC write against a higher-priority cancellation.
+// Mission authority attaches one to its context so cancellation and the actual
+// conn.Send() share the same tiny critical section: either the write commits
+// first, or cancellation wins first and the stale write is refused.  The guard
+// covers only the transport write itself, never an ACK wait.
+type SendGuard interface {
+	DoSend(func() error) error
+}
+
+type sendGuardContextKey struct{}
+
+// WithSendGuard attaches a final-write guard to ctx.  Normal/manual callers do
+// not need one; it is used by cancellable Core mission sends to close the
+// ctx.Err() -> conn.Send() TOCTOU window without holding API ownership locks
+// across long ACK waits.
+func WithSendGuard(ctx context.Context, guard SendGuard) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if guard == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, sendGuardContextKey{}, guard)
+}
+
+type chainedSendGuard struct {
+	outer SendGuard
+	inner SendGuard
+}
+
+func (g *chainedSendGuard) DoSend(send func() error) error {
+	if g == nil || g.outer == nil || g.inner == nil {
+		return context.Canceled
+	}
+	return g.outer.DoSend(func() error { return g.inner.DoSend(send) })
+}
+
+// WithAdditionalSendGuard composes a second final-write guard without replacing
+// an existing mission/operator guard already attached to ctx. The existing guard
+// stays outermost, so ownership cancellation is checked before the additional
+// boundary. Both guards cover only the short transport write performed by
+// guardedSend; COMMAND_ACK waits remain outside their critical sections.
+func WithAdditionalSendGuard(ctx context.Context, guard SendGuard) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if guard == nil {
+		return ctx
+	}
+	if existing, ok := ctx.Value(sendGuardContextKey{}).(SendGuard); ok && existing != nil {
+		guard = &chainedSendGuard{outer: existing, inner: guard}
+	}
+	return context.WithValue(ctx, sendGuardContextKey{}, guard)
+}
+
+type sendGuardFunc func(func() error) error
+
+func (f sendGuardFunc) DoSend(send func() error) error { return f(send) }
+
+func guardedSend(ctx context.Context, send func() error) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if guard, ok := ctx.Value(sendGuardContextKey{}).(SendGuard); ok && guard != nil {
+		return guard.DoSend(func() error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return send()
+		})
+	}
+	return send()
+}
+
 // Drone = สถานะ 1 ลำ (mutex-guarded) + ช่องส่งคำสั่ง (conn)
 type Drone struct {
 	ID   uint32
@@ -92,6 +169,8 @@ type Drone struct {
 	connectStart   time.Time
 	firstTelemetry time.Time
 	lastMsg        time.Time
+	positionAt     time.Time // GLOBAL_POSITION_INT sample time; must not be refreshed by heartbeat/other MAVLink
+	gpsAt          time.Time // GPS_RAW_INT fix sample time; navigation validity requires a current fix sample
 
 	// COMMAND_ACK waiting: MAV_CMD -> channel รับ result code
 	ackMu       sync.Mutex
@@ -173,6 +252,7 @@ func (d *Drone) HandleFrame(sysID byte, msg message.Message) {
 		d.lon = float64(m.Lon) / 1e7
 		d.altAbs = float64(m.Alt) / 1000.0
 		d.altRel = float64(m.RelativeAlt) / 1000.0
+		d.positionAt = time.Now()
 		// อัปเดตจุดปล่อยขณะอยู่บนพื้นเสมอ รองรับทั้ง TAKEOFF จาก Cockpit
 		// และการขึ้นบินด้วยรีโมท.  หลังพ้นพื้นแล้วค่าจะ freeze ตลอด sortie.
 		d.captureLaunchPositionLocked(false)
@@ -215,6 +295,7 @@ func (d *Drone) HandleFrame(sysID byte, msg message.Message) {
 	case *ardupilotmega.MessageGpsRawInt:
 		d.gpsFix = int(m.FixType)
 		d.sats = int(m.SatellitesVisible)
+		d.gpsAt = time.Now()
 	case *ardupilotmega.MessageAttitude:
 		d.roll = float64(m.Roll) * 180.0 / math.Pi
 		d.pitch = float64(m.Pitch) * 180.0 / math.Pi
@@ -283,7 +364,7 @@ func (d *Drone) sendCmd(ctx context.Context, cmd common.MAV_CMD, p [7]float32) (
 		Param1: p[0], Param2: p[1], Param3: p[2], Param4: p[3],
 		Param5: p[4], Param6: p[5], Param7: p[6],
 	}
-	if err := d.conn.Send(msg); err != nil {
+	if err := guardedSend(ctx, func() error { return d.conn.Send(msg) }); err != nil {
 		return -1, err
 	}
 	select {
@@ -545,7 +626,7 @@ func (d *Drone) sendRCOverride() error {
 }
 
 // Goto ส่ง SET_POSITION_TARGET_GLOBAL_INT (position-only mask) — ไม่มี ACK
-func (d *Drone) Goto(lat, lon, alt float64) error {
+func (d *Drone) GotoContext(ctx context.Context, lat, lon, alt float64) error {
 	const posOnly = 3576 // ignore vel+accel+yaw+yawrate
 	msg := &common.MessageSetPositionTargetGlobalInt{
 		TargetSystem: d.targetSys(), TargetComponent: 1,
@@ -555,12 +636,16 @@ func (d *Drone) Goto(lat, lon, alt float64) error {
 		LonInt:          int32(lon * 1e7),
 		Alt:             float32(alt),
 	}
-	return d.conn.Send(msg)
+	return guardedSend(ctx, func() error { return d.conn.Send(msg) })
+}
+
+func (d *Drone) Goto(lat, lon, alt float64) error {
+	return d.GotoContext(context.Background(), lat, lon, alt)
 }
 
 // MoveVelocity สั่งความเร็ว body-frame (vx=หน้า, vy=ขวา, vz=ลง m/s; yawRate rad/s)
 // สำหรับบังคับด้วยรีโมท/ปุ่มทิศทาง (ต้องส่งซ้ำ ~5Hz; หยุดส่ง=หยุด)
-func (d *Drone) MoveVelocity(vx, vy, vz, yawRate float64) error {
+func (d *Drone) MoveVelocityContext(ctx context.Context, vx, vy, vz, yawRate float64) error {
 	const velMask = 1479 // ignore pos+accel+yaw ; keep vel+yawrate
 	msg := &common.MessageSetPositionTargetLocalNed{
 		TargetSystem: d.targetSys(), TargetComponent: 1,
@@ -571,7 +656,11 @@ func (d *Drone) MoveVelocity(vx, vy, vz, yawRate float64) error {
 		Vz:              float32(vz),
 		YawRate:         float32(yawRate),
 	}
-	return d.conn.Send(msg)
+	return guardedSend(ctx, func() error { return d.conn.Send(msg) })
+}
+
+func (d *Drone) MoveVelocity(vx, vy, vz, yawRate float64) error {
+	return d.MoveVelocityContext(context.Background(), vx, vy, vz, yawRate)
 }
 
 // SetParam ตั้งค่าพารามิเตอร์ของ FC (PARAM_SET)
@@ -593,8 +682,10 @@ func (d *Drone) SetParam(id string, value float64) error {
 	return d.conn.Send(msg)
 }
 
-// GotoYaw เหมือน Goto แต่บังคับ yaw ด้วย (deg, 0=เหนือ) — ให้ลูกหันหน้าตามแม่
-func (d *Drone) GotoYaw(lat, lon, alt, yawDeg float64) error {
+// GotoYawContext is the cancellable/final-write-guarded yaw variant used by
+// swarm form-up. A higher-priority takeover can therefore close the same tiny
+// transport boundary used by other guarded navigation writes.
+func (d *Drone) GotoYawContext(ctx context.Context, lat, lon, alt, yawDeg float64) error {
 	const posYaw = 2552 // ignore vel+accel+yawrate (ไม่ ignore yaw)
 	msg := &common.MessageSetPositionTargetGlobalInt{
 		TargetSystem: d.targetSys(), TargetComponent: 1,
@@ -605,7 +696,12 @@ func (d *Drone) GotoYaw(lat, lon, alt, yawDeg float64) error {
 		Alt:             float32(alt),
 		Yaw:             float32(yawDeg * math.Pi / 180.0),
 	}
-	return d.conn.Send(msg)
+	return guardedSend(ctx, func() error { return d.conn.Send(msg) })
+}
+
+// GotoYaw เหมือน Goto แต่บังคับ yaw ด้วย (deg, 0=เหนือ) — ให้ลูกหันหน้าตามแม่
+func (d *Drone) GotoYaw(lat, lon, alt, yawDeg float64) error {
+	return d.GotoYawContext(context.Background(), lat, lon, alt, yawDeg)
 }
 
 // ════════════════ STATE / SNAPSHOT ════════════════
@@ -739,10 +835,19 @@ func (d *Drone) SafetyState() safety.DroneState {
 	if !d.lastMsg.IsZero() {
 		age = time.Since(d.lastMsg).Seconds()
 	}
+	positionAge := -1.0
+	if !d.positionAt.IsZero() {
+		positionAge = time.Since(d.positionAt).Seconds()
+	}
+	gpsAge := -1.0
+	if !d.gpsAt.IsZero() {
+		gpsAge = time.Since(d.gpsAt).Seconds()
+	}
 	return safety.DroneState{
 		ID: d.ID, Lat: d.lat, Lon: d.lon, AltRel: d.altRel,
 		BatteryPct: d.battPct, SatCount: d.sats, GpsFix: d.gpsFix,
-		Armed: d.armed, Mode: d.mode, Heading: d.heading, TelemetryAgeSec: age,
+		Armed: d.armed, Mode: d.mode, Heading: d.heading,
+		TelemetryAgeSec: age, PositionAgeSec: positionAge, GpsAgeSec: gpsAge,
 	}
 }
 

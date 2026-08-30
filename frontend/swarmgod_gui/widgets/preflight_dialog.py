@@ -123,7 +123,7 @@ class PreflightDialog(QDialog):
     _all_done = pyqtSignal()
 
     def __init__(self, parent=None, *, client=None, snapshot_fn=None,
-                 telem_fn=None, target_ids=None, log_fn=None):
+                 telem_fn=None, target_ids=None, log_fn=None, dispatch_fn=None):
         super().__init__(parent)
         self.setWindowTitle("ทดสอบระบบก่อนบินจริง")
         self.setMinimumSize(600, 620)
@@ -134,6 +134,10 @@ class PreflightDialog(QDialog):
         self._telem_fn = telem_fn or (lambda did: {})
         self._target_ids = list(target_ids or [])
         self._log = log_fn or (lambda *a, **k: None)
+        # Optional observable command boundary supplied by GroundStation. Tests
+        # and standalone dialog use can omit it and retain the exact legacy
+        # direct-client behavior.
+        self._dispatch_fn = dispatch_fn
 
         self.results = []               # CheckResult ที่ตรวจเสร็จแล้ว
         self.passed = False
@@ -298,17 +302,30 @@ class PreflightDialog(QDialog):
                 pf.CheckResult(c.key, c.title, c.group, c.severity, status, detail))
         self._all_done.emit()
 
+    def _dispatch_live(self, label, ids, invoke):
+        """Route preflight flight-mutating checks through the cockpit gateway.
+
+        Preflight is an intentional verification sequence, not a double-click UI
+        action, so the supplied dispatcher must preserve execution order and may
+        disable frontend dedup while still attaching correlation/observability.
+        Standalone/tests without a dispatcher keep legacy direct-client behavior.
+        """
+        if callable(self._dispatch_fn):
+            return self._dispatch_fn(label, invoke, list(ids))
+        return invoke()
+
     def _run_live(self, check, ids):
         cl = self._client
         if check.key == "cmd.hold":
-            r = cl.hold(ids)
+            r = self._dispatch_live("HOLD [preflight]", ids, lambda: cl.hold(ids))
             ok = bool(getattr(r, "ok", False))
             return (pf.PASS if ok else pf.WARN,
                     "core ตอบรับ" if ok else "core ปฏิเสธ: %s"
                     % (getattr(r, "message", "") or "ไม่ทราบสาเหตุ"))
 
         if check.key == "cmd.mode_guided":
-            r = cl.set_mode(ids, _GUIDED)
+            r = self._dispatch_live(
+                "MODE GUIDED [preflight]", ids, lambda: cl.set_mode(ids, _GUIDED))
             if not bool(getattr(r, "ok", False)):
                 return pf.FAIL, "core ปฏิเสธ: %s" % (getattr(r, "message", "") or "-")
             bad = self._await(ids, lambda t: (t.get("mode_name") or "").upper() == "GUIDED",
@@ -319,11 +336,15 @@ class PreflightDialog(QDialog):
             return pf.PASS, "ทุกลำรายงานโหมด GUIDED กลับมาแล้ว"
 
         if check.key == "cmd.reject_unconfirmed":
-            r = cl.takeoff(ids, 2.0, confirmed=False)
+            r = self._dispatch_live(
+                "TAKEOFF UNCONFIRMED [preflight]", ids,
+                lambda: cl.takeoff(ids, 2.0, confirmed=False))
             if bool(getattr(r, "ok", False)):
                 # อันตราย: core ยอมรับ takeoff ที่ไม่ยืนยัน → ดับมอเตอร์ทันที
                 try:
-                    cl.disarm(ids, confirmed=True)
+                    self._dispatch_live(
+                        "DISARM RECOVERY [preflight]", ids,
+                        lambda: cl.disarm(ids, confirmed=True))
                 except Exception:
                     pass
                 return pf.FAIL, ("core ยอมรับ TAKEOFF ที่ไม่ได้ยืนยัน — "
@@ -332,11 +353,12 @@ class PreflightDialog(QDialog):
                 getattr(r, "message", "") or "rejected")
 
         if check.key == "cmd.arm_disarm":
-            r = cl.arm(ids)
+            r = self._dispatch_live("ARM [preflight]", ids, lambda: cl.arm(ids))
             if not bool(getattr(r, "ok", False)):
                 return pf.FAIL, "ARM ไม่ผ่าน: %s" % (getattr(r, "message", "") or "-")
             not_armed = self._await(ids, lambda t: bool(t.get("armed")), 10.0)
-            cl.disarm(ids, confirmed=True)
+            self._dispatch_live(
+                "DISARM [preflight]", ids, lambda: cl.disarm(ids, confirmed=True))
             still_armed = self._await(ids, lambda t: not t.get("armed"), 10.0)
             if not_armed:
                 return pf.FAIL, ("สั่ง ARM แล้วไม่ armed จริง: "

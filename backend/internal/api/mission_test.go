@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -14,6 +15,77 @@ import (
 // (the mission handlers touch nothing else — proving F3 "no flight command").
 func newMissionServer() *Server {
 	return &Server{mission: mission.NewEngine(nil)}
+}
+
+type apiMissionCommander struct {
+	attempts    int // GOTO attempts including rejected sends
+	calls       int // successful GOTO sends
+	holdCalls   int
+	gotoIDs     []uint32 // drone ids of successful GOTO sends, in send order
+	gotoErr     error
+	holdErr     error
+	rtlCalls    int
+	rtlIDs      []uint32
+	rtlBlock    chan struct{}
+	rtlStarted  chan context.Context
+	perDroneErr map[uint32]error     // optional per-drone GOTO error (overrides gotoErr)
+	lastCtx     context.Context      // last send's ctx (safe: set synchronously in-caller)
+	block       chan struct{}        // if set, a send blocks until closed or ctx done
+	started     chan context.Context // if set, receives the send's ctx when it begins
+}
+
+func (c *apiMissionCommander) run(ctx context.Context) (blockedErr error, blocked bool) {
+	c.lastCtx = ctx
+	if c.started != nil {
+		c.started <- ctx
+	}
+	if c.block != nil {
+		select {
+		case <-c.block:
+		case <-ctx.Done():
+			return ctx.Err(), true
+		}
+	}
+	return nil, false
+}
+
+func (c *apiMissionCommander) Goto(ctx context.Context, droneID uint32, lat, lon, alt float64) error {
+	if err, blocked := c.run(ctx); blocked {
+		return err
+	}
+	c.attempts++
+	if c.perDroneErr != nil {
+		if err, ok := c.perDroneErr[droneID]; ok && err != nil {
+			return err // rejected before it counts as a committed send
+		}
+	}
+	c.calls++
+	c.gotoIDs = append(c.gotoIDs, droneID)
+	return c.gotoErr
+}
+
+func (c *apiMissionCommander) Hold(ctx context.Context, droneID uint32) error {
+	if err, blocked := c.run(ctx); blocked {
+		return err
+	}
+	c.holdCalls++
+	return c.holdErr
+}
+
+func (c *apiMissionCommander) RTL(ctx context.Context, droneID uint32) error {
+	if c.rtlStarted != nil {
+		c.rtlStarted <- ctx
+	}
+	if c.rtlBlock != nil {
+		select {
+		case <-c.rtlBlock:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	c.rtlCalls++
+	c.rtlIDs = append(c.rtlIDs, droneID)
+	return nil
 }
 
 func pbGroupedPlan(planID string) *pb.MissionPlan {
@@ -38,6 +110,264 @@ func TestStartMissionCreatesRun(t *testing.T) {
 	}
 	if !resp.Ok || resp.RunId == 0 || resp.State != pb.MissionRunState_MISSION_STATE_RUNNING {
 		t.Fatalf("bad start response: %+v", resp)
+	}
+	if resp.AuthorityActive {
+		t.Fatal("shadow/default server must not claim Core authority")
+	}
+}
+
+func TestStartMissionReportsAuthorityAndRejectsIneligiblePlan(t *testing.T) {
+	s := newMissionServer()
+	cmd := &apiMissionCommander{}
+	s.mission.EnableAuthority()
+	s.missionAuthority = true
+	s.missionExec = cmd
+	plan := pbGroupedPlan("authority")
+	plan.Participants = []uint32{1}
+	resp, err := s.StartMission(context.Background(), &pb.StartMissionRequest{Plan: plan, OperationId: "op-auth"})
+	if err != nil || !resp.Ok || !resp.AuthorityActive || resp.RunId == 0 {
+		t.Fatalf("eligible authority start = %+v err=%v", resp, err)
+	}
+	if cmd.calls != 1 {
+		t.Fatalf("eligible authority start must dispatch one GOTO, got %d", cmd.calls)
+	}
+	st := missionState(t, s)
+	if !st.AuthorityActive {
+		t.Fatal("GetMissionState must report active Core authority")
+	}
+
+	s2 := newMissionServer()
+	cmd2 := &apiMissionCommander{}
+	s2.mission.EnableAuthority()
+	s2.missionAuthority = true
+	s2.missionExec = cmd2
+	bad, _ := s2.StartMission(context.Background(), &pb.StartMissionRequest{Plan: pbGroupedPlan("multi"), OperationId: "op-bad"})
+	if bad.Ok || bad.RunId != 0 || cmd2.calls != 0 {
+		t.Fatalf("ineligible authority plan must be rejected before command: %+v calls=%d", bad, cmd2.calls)
+	}
+}
+
+func TestAuthorityWaitDispatchesSingleHoldThroughExecutor(t *testing.T) {
+	s := newMissionServer()
+	cmd := &apiMissionCommander{}
+	s.mission.EnableWaitAuthority()
+	s.missionAuthority = true
+	s.missionExec = cmd
+	plan := pbGroupedPlan("wait-authority")
+	plan.Participants = []uint32{1}
+	plan.Routes[0].Points[0].WaitSeconds = 60
+	resp, err := s.StartMission(context.Background(), &pb.StartMissionRequest{Plan: plan, OperationId: "op-wait"})
+	if err != nil || !resp.Ok || cmd.calls != 1 {
+		t.Fatalf("authority WAIT start: resp=%+v err=%v gotos=%d", resp, err, cmd.calls)
+	}
+	s.observeFrom([]*pb.Telemetry{telem(1, 14.0, 100.0)})
+	if cmd.holdCalls != 1 {
+		t.Fatalf("arrival at WAIT must dispatch exactly one HOLD, got %d", cmd.holdCalls)
+	}
+	if st := missionState(t, s); st.State != pb.MissionRunState_MISSION_STATE_WAITING {
+		t.Fatalf("state after WAIT arrival = %s", st.State)
+	}
+	s.observeFrom([]*pb.Telemetry{telem(1, 14.0, 100.0)})
+	if cmd.holdCalls != 1 {
+		t.Fatalf("repeated observation must not duplicate HOLD, got %d", cmd.holdCalls)
+	}
+}
+
+func TestAuthorityWaitHoldRejectFailsRun(t *testing.T) {
+	s := newMissionServer()
+	cmd := &apiMissionCommander{holdErr: fmt.Errorf("hold rejected")}
+	s.mission.EnableWaitAuthority()
+	s.missionAuthority = true
+	s.missionExec = cmd
+	plan := pbGroupedPlan("wait-reject")
+	plan.Participants = []uint32{1}
+	plan.Routes[0].Points[0].WaitSeconds = 60
+	_, _ = s.StartMission(context.Background(), &pb.StartMissionRequest{Plan: plan, OperationId: "op-wait-reject"})
+	s.observeFrom([]*pb.Telemetry{telem(1, 14.0, 100.0)})
+	st := missionState(t, s)
+	if st.State != pb.MissionRunState_MISSION_STATE_FAILED || st.Active {
+		t.Fatalf("rejected HOLD must fail closed: %+v", st)
+	}
+}
+
+func TestManualGotoAndRcMoveRejectWhileCoreOwnsDrone(t *testing.T) {
+	s := newMissionServer()
+	cmd := &apiMissionCommander{}
+	s.mission.EnableAuthority()
+	s.missionAuthority = true
+	s.missionExec = cmd
+	plan := pbGroupedPlan("manual-overlap")
+	plan.Participants = []uint32{1}
+	start, err := s.StartMission(context.Background(), &pb.StartMissionRequest{
+		Plan: plan, OperationId: "op-manual-overlap",
+	})
+	if err != nil || !start.Ok || !start.AuthorityActive {
+		t.Fatalf("authority start failed: resp=%+v err=%v", start, err)
+	}
+	if cmd.calls != 1 {
+		t.Fatalf("initial authority GOTO calls=%d want 1", cmd.calls)
+	}
+
+	gotoRes, err := s.Goto(context.Background(), &pb.GotoRequest{
+		DroneId: 1, Lat: 14.5, Lon: 100.5, Alt: 20, RequestId: "manual-goto",
+	})
+	if err != nil || gotoRes.Ok || !strings.Contains(gotoRes.Message, "Core mission owns navigation") {
+		t.Fatalf("manual GOTO must be rejected during Core authority: res=%+v err=%v", gotoRes, err)
+	}
+	if cmd.calls != 1 {
+		t.Fatalf("rejected manual GOTO must not reach mission executor, calls=%d", cmd.calls)
+	}
+
+	rcRes, err := s.RcMove(context.Background(), &pb.RcMoveRequest{
+		Target: &pb.Target{DroneIds: []uint32{1}}, Speed: 1,
+	})
+	if err != nil || rcRes.Ok || !strings.Contains(rcRes.Message, "Core mission owns navigation") {
+		t.Fatalf("manual RcMove must be rejected during Core authority: res=%+v err=%v", rcRes, err)
+	}
+
+	modeRes, err := s.SetMode(context.Background(), &pb.SetModeRequest{
+		Target: &pb.Target{DroneIds: []uint32{1}}, RequestId: "manual-mode",
+	})
+	if err != nil || modeRes.Ok || !strings.Contains(modeRes.Message, "Core mission owns navigation") {
+		t.Fatalf("manual SetMode must be rejected during Core authority: res=%+v err=%v", modeRes, err)
+	}
+	if st := missionState(t, s); !st.Active || !st.AuthorityActive || st.RunId != start.RunId {
+		t.Fatalf("manual rejection must leave the Core run authoritative: %+v", st)
+	}
+}
+
+func TestArmTakeoffAndSwarmStartRejectWhileCoreOwnsNavigation(t *testing.T) {
+	s := newMissionServer()
+	cmd := &apiMissionCommander{}
+	s.mission.EnableAuthority()
+	s.missionAuthority = true
+	s.missionExec = cmd
+	plan := pbGroupedPlan("manual-flight-overlap")
+	plan.Participants = []uint32{1}
+	start, err := s.StartMission(context.Background(), &pb.StartMissionRequest{
+		Plan: plan, OperationId: "op-manual-flight-overlap",
+	})
+	if err != nil || !start.Ok || !start.AuthorityActive {
+		t.Fatalf("authority start failed: resp=%+v err=%v", start, err)
+	}
+	target := &pb.Target{DroneIds: []uint32{1}}
+
+	arm, err := s.Arm(context.Background(), &pb.ArmRequest{
+		Target: target, RequestId: "manual-arm",
+	})
+	if err != nil || arm.Ok || !strings.Contains(arm.Message, "Core mission owns navigation") {
+		t.Fatalf("ARM must be rejected during Core authority: res=%+v err=%v", arm, err)
+	}
+
+	takeoff, err := s.Takeoff(context.Background(), &pb.TakeoffRequest{
+		Target: target, Altitude: 20, Confirmed: true, RequestId: "manual-takeoff",
+	})
+	if err != nil || takeoff.Ok || !strings.Contains(takeoff.Message, "Core mission owns navigation") {
+		t.Fatalf("TAKEOFF must be rejected during Core authority: res=%+v err=%v", takeoff, err)
+	}
+
+	swarmStart, err := s.SwarmControl(context.Background(), &pb.SwarmControlRequest{
+		Action: pb.SwarmControlRequest_START,
+	})
+	if err != nil || swarmStart.Ok || !strings.Contains(swarmStart.Message, "Core mission owns navigation") {
+		t.Fatalf("Swarm START must be rejected during Core authority: res=%+v err=%v", swarmStart, err)
+	}
+	if st := missionState(t, s); !st.Active || !st.AuthorityActive || st.RunId != start.RunId {
+		t.Fatalf("rejected manual commands must leave Core mission authoritative: %+v", st)
+	}
+}
+
+func TestRejectedManualGotoDoesNotCorruptAuthorityProgression(t *testing.T) {
+	s := newMissionServer()
+	cmd := &apiMissionCommander{}
+	s.mission.EnableAuthority()
+	s.missionAuthority = true
+	s.missionExec = cmd
+	plan := pbGroupedPlan("manual-claim-index")
+	plan.Participants = []uint32{1}
+	start, err := s.StartMission(context.Background(), &pb.StartMissionRequest{
+		Plan: plan, OperationId: "op-manual-claim-index",
+	})
+	if err != nil || !start.Ok || cmd.calls != 1 {
+		t.Fatalf("authority start failed: resp=%+v err=%v calls=%d", start, err, cmd.calls)
+	}
+
+	res, _ := s.Goto(context.Background(), &pb.GotoRequest{
+		DroneId: 1, Lat: 14.9, Lon: 100.9, Alt: 25, RequestId: "manual-race",
+	})
+	if res.Ok {
+		t.Fatal("manual GOTO must not take authority from the active mission")
+	}
+	// Arrival at WP0 must still advance exactly once to WP1. The rejected manual
+	// command must not alter authorityClaimedIndex or resurrect a second owner.
+	s.observeFrom([]*pb.Telemetry{telem(1, 14.0, 100.0)})
+	if cmd.calls != 2 {
+		t.Fatalf("mission should dispatch exactly one next GOTO after arrival, calls=%d", cmd.calls)
+	}
+	s.observeFrom([]*pb.Telemetry{telem(1, 14.0, 100.0)})
+	if cmd.calls != 2 {
+		t.Fatalf("repeated observation duplicated authority GOTO, calls=%d", cmd.calls)
+	}
+}
+
+func TestOperatorTakeoverCancelsOwnedCoreRunBeforeHoldStop(t *testing.T) {
+	s := newMissionServer()
+	cmd := &apiMissionCommander{}
+	s.mission.EnableAuthority()
+	s.missionAuthority = true
+	s.missionExec = cmd
+	plan := pbGroupedPlan("operator-takeover")
+	plan.Participants = []uint32{1}
+	start, err := s.StartMission(context.Background(), &pb.StartMissionRequest{
+		Plan: plan, OperationId: "op-operator-takeover",
+	})
+	if err != nil || !start.Ok {
+		t.Fatalf("authority start failed: resp=%+v err=%v", start, err)
+	}
+	s.missionDispatchMu.Lock()
+	cancelled := s.cancelMissionForOperatorTargetsLocked([]uint32{1})
+	s.missionDispatchMu.Unlock()
+	if !cancelled {
+		t.Fatal("operator takeover should cancel an owned Core mission")
+	}
+	if st := missionState(t, s); st.Active || st.State != pb.MissionRunState_MISSION_STATE_CANCELLED {
+		t.Fatalf("operator takeover must make mission terminal before stop/hold: %+v", st)
+	}
+}
+
+func TestCoreMissionSwarmMutualExclusionIsWired(t *testing.T) {
+	missionSrc, err := os.ReadFile("mission.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(missionSrc), "s.swarmNavigationBusy()") {
+		t.Fatal("StartMission must reject while swarm/return navigation is busy")
+	}
+	serverSrc, err := os.ReadFile("server.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(serverSrc)
+	for _, required := range []string{
+		"s.swarm.NavigationBusy()",
+		"s.missionAuthorityActiveLocked()",
+		"s.cancelMissionForOperatorTargetsLocked(req.DroneIds)",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("server ownership boundary missing %q", required)
+		}
+	}
+}
+
+func TestProtoToPlanPreservesParticipantAltitudes(t *testing.T) {
+	p := pbGroupedPlan("alts")
+	p.ParticipantAltitudes = map[uint32]float64{1: 18.5, 2: 27.0}
+	plan := protoToPlan(p)
+	if got := plan.AltitudeFor(1, 20); got != 18.5 {
+		t.Fatalf("D1 altitude = %v, want 18.5", got)
+	}
+	if got := plan.AltitudeFor(2, 20); got != 27.0 {
+		t.Fatalf("D2 altitude = %v, want 27", got)
 	}
 }
 
@@ -119,6 +449,9 @@ func TestGetMissionStateReconnect(t *testing.T) {
 	if len(st.Participants) != 2 {
 		t.Fatalf("participants = %v, want 2", st.Participants)
 	}
+	if st.Plan == nil || st.Plan.PlanId != "p1" || len(st.Plan.Routes) != 1 || len(st.Plan.Routes[0].Points) != 2 {
+		t.Fatalf("reconnect query must include frozen plan for UI rebuild: %+v", st.Plan)
+	}
 }
 
 func TestGetMissionStateNoRun(t *testing.T) {
@@ -191,18 +524,76 @@ func TestObserveFromNilPositionSafe(t *testing.T) {
 	}
 }
 
-// F3 exit: the mission RPC boundary must not send any flight command yet.
-func TestMissionHandlersIssueNoCommand(t *testing.T) {
+// F4 B1: Core-owned battery/link ALARMs must terminate mission progression
+// without issuing another flight command.  The fleet manager remains the owner
+// of the actual failsafe RTL; this API observer only latches INTERRUPTED.
+func TestMissionSafetyAlarmInterruptsParticipant(t *testing.T) {
+	for _, category := range []string{"battery", "link"} {
+		t.Run(category, func(t *testing.T) {
+			s := newMissionServer()
+			s.StartMission(context.Background(), &pb.StartMissionRequest{
+				Plan: pbGroupedPlan("p1"), OperationId: "op-1",
+			})
+			msg := category + " failsafe test"
+			s.handleMissionSafetyEvent(&pb.Event{
+				Level: pb.EventLevel_EVENT_LEVEL_ALARM, DroneId: 1,
+				Category: category, Message: msg,
+			})
+
+			st := missionState(t, s)
+			if st.State != pb.MissionRunState_MISSION_STATE_INTERRUPTED {
+				t.Fatalf("%s ALARM should interrupt active participant: state=%s", category, st.State)
+			}
+			if st.TerminalReason != msg {
+				t.Fatalf("terminal reason = %q, want %q", st.TerminalReason, msg)
+			}
+		})
+	}
+}
+
+func TestMissionSafetyEventFiltersNonAuthoritySignals(t *testing.T) {
+	cases := []struct {
+		name string
+		ev   *pb.Event
+	}{
+		{"nil", nil},
+		{"warn battery", &pb.Event{Level: pb.EventLevel_EVENT_LEVEL_WARN, DroneId: 1, Category: "battery", Message: "low-ish"}},
+		{"alarm other category", &pb.Event{Level: pb.EventLevel_EVENT_LEVEL_ALARM, DroneId: 1, Category: "servo", Message: "servo alarm"}},
+		{"alarm nonparticipant", &pb.Event{Level: pb.EventLevel_EVENT_LEVEL_ALARM, DroneId: 99, Category: "link", Message: "other drone link"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newMissionServer()
+			s.StartMission(context.Background(), &pb.StartMissionRequest{
+				Plan: pbGroupedPlan("p1"), OperationId: "op-1",
+			})
+			s.handleMissionSafetyEvent(tc.ev)
+			if st := missionState(t, s); st.State != pb.MissionRunState_MISSION_STATE_RUNNING {
+				t.Fatalf("non-authority signal must not interrupt mission: state=%s", st.State)
+			}
+		})
+	}
+}
+
+// F4/F5 exit: mission handlers may execute only the narrow claimed GOTO/HOLD
+// intents. They must never bypass that adapter to command.Service/swarm or add
+// unrelated flight commands to the mission boundary.
+func TestMissionAuthorityUsesOnlyNarrowExecutor(t *testing.T) {
 	src, err := os.ReadFile("mission.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(src)
-	// check actual calls (trailing dot / call parens), not prose in comments
-	forbidden := []string{"s.cmd.", "s.swarm.", ".Goto(", ".Hold(", ".Takeoff(", ".Rtl(", ".Idempotent("}
+	forbidden := []string{"s.cmd.", "s.swarm.Start(", "s.swarm.ReturnAndLand(",
+		".Takeoff(", ".Rtl(", ".Idempotent(", ".Servo(", ".Land("}
 	for _, bad := range forbidden {
 		if strings.Contains(text, bad) {
-			t.Errorf("mission.go references %q — F3 handlers must not send flight commands", bad)
+			t.Errorf("mission.go references %q — mission authority must use only the narrow executor", bad)
+		}
+	}
+	for _, required := range []string{"s.mission.ClaimAuthorityGoto()", "s.missionExec.Goto(", "s.mission.ClaimAuthorityHold()", "s.missionExec.Hold("} {
+		if !strings.Contains(text, required) {
+			t.Errorf("mission.go missing guarded authority path %q", required)
 		}
 	}
 }

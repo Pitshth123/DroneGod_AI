@@ -4,6 +4,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	pb "github.com/swarmgod/backend/gen/swarmgod/v1"
 )
 
@@ -21,8 +23,10 @@ type idemStore struct {
 }
 
 type idemEntry struct {
-	result  *pb.CommandResult
-	expires time.Time
+	result   *pb.CommandResult
+	expires  time.Time
+	done     chan struct{}
+	complete bool
 }
 
 func newIdemStore(retention time.Duration) *idemStore {
@@ -36,61 +40,80 @@ func newIdemStore(retention time.Duration) *idemStore {
 	}
 }
 
-// do รัน fn ครั้งเดียวต่อ key ภายใน retention window:
-//   - requestID ว่าง → รัน fn ตรง ๆ ไม่ cache
-//   - key ซ้ำและยังไม่หมดอายุ → คืนผลเดิม (ไม่ยิงคำสั่งซ้ำ)
+// do runs fn exactly once per key within the retention window:
+//   - empty requestID: no dedup, run fn directly
+//   - completed key: replay the cached result
+//   - in-flight key: wait for the ORIGINAL execution to finish; never start a
+//     second fn merely because an arbitrary wall-clock timeout elapsed
 //
-// หมายเหตุ concurrency: ใช้ per-key "in-flight" guard กัน 2 request พร้อมกันด้วย key เดียว
-// ยิงคำสั่งซ้อน — ตัวที่สองรอผลตัวแรก
-// do คืน (result, replay) — replay=true ถ้าเป็นผลจาก cache (ไม่ได้ยิงคำสั่งจริง)
+// The in-flight entry owns a completion channel.  This is important for long
+// commands such as Takeoff (up to ~90 s): a same-request retry must not turn into
+// a second execution or a self-BUSY result after 10 s.  If the original panics,
+// the slot is deleted and waiters are released so the key cannot deadlock
+// permanently; a waiter may then become the next real attempt.
 func (s *idemStore) do(requestID string, droneID uint32, fn func() *pb.CommandResult) (*pb.CommandResult, bool) {
 	if requestID == "" {
-		return fn(), false // ไม่มี id = ไม่ dedup
+		return fn(), false
 	}
 	key := requestID + "#" + utoa(droneID)
 
-	s.mu.Lock()
-	s.sweepLocked()
-	if e, ok := s.entries[key]; ok && time.Now().Before(e.expires) {
-		if e.result != nil { // ผลพร้อมแล้ว → คืนเลย
-			s.mu.Unlock()
-			return dupResult(e.result), true
-		}
-		// กำลังประมวลผลอยู่ (result=nil) → ปล่อย lock แล้วรอสั้น ๆ
-		s.mu.Unlock()
-		return s.waitInflight(key, fn, droneID, requestID)
-	}
-	// จอง slot (in-flight)
-	s.entries[key] = idemEntry{result: nil, expires: time.Now().Add(s.retention)}
-	s.mu.Unlock()
-
-	res := fn()
-
-	s.mu.Lock()
-	s.entries[key] = idemEntry{result: res, expires: time.Now().Add(s.retention)}
-	s.mu.Unlock()
-	return res, false
-}
-
-// waitInflight รอผลของ request ที่ key เดียวกันซึ่งกำลังประมวลผล (poll สั้น ๆ, มี deadline)
-func (s *idemStore) waitInflight(key string, fn func() *pb.CommandResult, droneID uint32, requestID string) (*pb.CommandResult, bool) {
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
+	for {
+		now := time.Now()
 		s.mu.Lock()
-		e, ok := s.entries[key]
-		if ok && e.result != nil {
-			s.mu.Unlock()
-			return dupResult(e.result), true
+		s.sweepLocked()
+		if e, ok := s.entries[key]; ok {
+			if e.complete {
+				if now.Before(e.expires) {
+					res := dupResult(e.result)
+					s.mu.Unlock()
+					return res, true
+				}
+				delete(s.entries, key)
+			} else {
+				done := e.done
+				s.mu.Unlock()
+				<-done
+				// The original either completed (next loop replays it) or panicked
+				// and removed the slot (next loop safely elects a new owner).
+				continue
+			}
 		}
-		if !ok { // slot หายไป (หมดอายุ/ถูก sweep) → เริ่มใหม่
-			s.mu.Unlock()
-			return s.do(requestID, droneID, fn)
+
+		done := make(chan struct{})
+		s.entries[key] = idemEntry{done: done}
+		s.mu.Unlock()
+
+		var res *pb.CommandResult
+		var panicked any
+		func() {
+			defer func() {
+				if p := recover(); p != nil {
+					panicked = p
+				}
+			}()
+			res = fn()
+		}()
+
+		s.mu.Lock()
+		e, stillOwner := s.entries[key]
+		if stillOwner && e.done == done {
+			if panicked != nil {
+				delete(s.entries, key)
+			} else {
+				e.result = res
+				e.complete = true
+				e.expires = time.Now().Add(s.retention)
+				s.entries[key] = e
+			}
+			close(done)
 		}
 		s.mu.Unlock()
+
+		if panicked != nil {
+			panic(panicked)
+		}
+		return res, false
 	}
-	// รอนานเกิน → ยอมยิงเอง (กัน deadlock)
-	return fn(), false
 }
 
 // sweepLocked ลบ entry หมดอายุ (เรียกภายใต้ lock; throttle ทุก ~retention)
@@ -101,7 +124,9 @@ func (s *idemStore) sweepLocked() {
 	}
 	s.lastSweep = now
 	for k, e := range s.entries {
-		if now.After(e.expires) {
+		// Never sweep an in-flight owner: waiters are blocked on e.done and the
+		// original execution is the only command allowed to complete this key.
+		if e.complete && now.After(e.expires) {
 			delete(s.entries, k)
 		}
 	}
@@ -112,14 +137,17 @@ func dupResult(r *pb.CommandResult) *pb.CommandResult {
 	if r == nil {
 		return nil
 	}
-	msg := r.Message
-	if msg != "" {
-		msg += " (idempotent replay)"
+	// Preserve the complete protobuf result shape (including request_id and
+	// per-drone aggregate detail) without copying protoimpl.MessageState locks.
+	// Only the human-readable message is annotated as a replay.
+	out, ok := proto.Clone(r).(*pb.CommandResult)
+	if !ok || out == nil {
+		return nil
 	}
-	return &pb.CommandResult{
-		Ok: r.Ok, DroneId: r.DroneId, Command: r.Command,
-		ResultCode: r.ResultCode, Message: msg, Outcome: r.Outcome,
+	if out.Message != "" {
+		out.Message += " (idempotent replay)"
 	}
+	return out
 }
 
 func utoa(n uint32) string {

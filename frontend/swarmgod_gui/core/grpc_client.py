@@ -5,12 +5,14 @@ grpc_client.py — เชื่อม Python cockpit เข้ากับ Go co
 """
 import collections
 import os
+import threading
 import uuid
 
 import grpc
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from . import rpc
+from .command_correlation import current_command_correlation
 from .rpc import telemetry_pb2, command_pb2, swarm_pb2, service_pb2, service_pb2_grpc
 
 
@@ -47,6 +49,44 @@ class _BearerAuthInterceptor(grpc.UnaryUnaryClientInterceptor,
     def intercept_unary_stream(self, continuation, details, request):
         return continuation(self._with_auth(details), request)
 
+
+class _CommandCorrelationInterceptor(grpc.UnaryUnaryClientInterceptor):
+    """Attach V3-S08 command identity to operator unary RPCs.
+
+    CommandGateway binds the current ticket only around ``invoke()``.  Calls
+    outside that boundary (telemetry/lifecycle/background reads) therefore carry
+    no correlation metadata and remain behaviorally unchanged.
+    """
+
+    _KEYS = {
+        "operation_id": "x-swarmgod-operation-id",
+        "command_id": "x-swarmgod-command-id",
+        "attempt_id": "x-swarmgod-attempt-id",
+    }
+
+    def intercept_unary_unary(self, continuation, details, request):
+        corr = current_command_correlation()
+        # Strip every caller-provided reserved key even when there is no Gateway
+        # context. Calls outside Gateway must carry no command correlation, and a
+        # stale metadata copy must never masquerade as the current attempt.
+        reserved = set(self._KEYS.values())
+        original_md = list(details.metadata or ())
+        md = [(k, v) for (k, v) in original_md if str(k).lower() not in reserved]
+        if corr:
+            # IDs bound by CommandGateway are the sole source of truth for this
+            # attempt and cannot authorize/bypass Core safety policy.
+            for field, key in self._KEYS.items():
+                value = str(corr.get(field) or "").strip()
+                if value:
+                    md.append((key, value))
+        elif md == original_md:
+            return continuation(details, request)
+        wrapped = _ClientCallDetails(
+            details.method, details.timeout, md, details.credentials,
+            getattr(details, "wait_for_ready", None),
+            getattr(details, "compression", None))
+        return continuation(wrapped, request)
+
 # certs/ อยู่ที่ราก SwarmGod (grpc_client.py -> core -> swarmgod_gui -> frontend -> SwarmGod)
 _CERTS = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "certs")
@@ -77,12 +117,30 @@ class CoreClient:
             self.channel = grpc.insecure_channel(addr)
             self.secure = False
         # แนบ session token ถ้าตั้ง env SWARMGOD_TOKEN (ออกจาก `swarmadmin session new`)
+        # และแนบ V3-S08 correlation metadata เฉพาะ unary call ที่ถูกเรียกอยู่
+        # ภายใน CommandGateway dispatch.  Correlation เป็น observability เท่านั้น
+        # และไม่มีผลต่อ auth / authority / safety / Core idempotency.
         token = os.getenv("SWARMGOD_TOKEN", "").strip()
         self.authenticated = bool(token)
+        interceptors = []
         if token:
-            self.channel = grpc.intercept_channel(
-                self.channel, _BearerAuthInterceptor(token))
+            interceptors.append(_BearerAuthInterceptor(token))
+        interceptors.append(_CommandCorrelationInterceptor())
+        self.channel = grpc.intercept_channel(self.channel, *interceptors)
         self.stub = service_pb2_grpc.SwarmGodServiceStub(self.channel)
+
+    def close(self):
+        """Release the gRPC channel owned by this client.
+
+        GroundStation owns the CoreClient it creates, so shutdown must close the
+        channel after telemetry/event streams are stopped.  This prevents native
+        gRPC connectivity poll threads from surviving repeated cockpit lifecycles
+        (notably the headless UI test suite) without changing command semantics.
+        """
+        try:
+            self.channel.close()
+        except Exception:
+            pass
 
     def connect_drone(self, drone_id: int, name: str, host: str, port: int,
                       protocol: str = "tcp"):
@@ -237,59 +295,117 @@ class CoreClient:
             points=verts, confirmed=True, request_id=self._rid()), timeout=10)
 
 
-class TelemetryThread(QThread):
+class _StreamThread(QThread):
+    """Base lifecycle for a gRPC server-streaming subscription QThread.
+
+    Shutdown is deterministic.  ``run()`` opens the stream and ``stop()`` cancels
+    it under one lock, so the two can never interleave into the crash window that
+    a naive ``self._call = ...; for x in self._call`` pattern allows:
+
+    * If ``stop()`` wins the race it sets ``_stopped`` before the stream is
+      opened, and ``run()`` returns without ever opening a stream.
+    * If ``run()`` wins it stores ``_call`` first, so ``stop()`` sees a live call
+      and cancels it; the iterator then exits with CANCELLED.
+
+    The stream iterator is therefore never left blocked inside cygrpc when the
+    owning channel is closed — the previous behaviour that produced a native
+    access violation (0xC0000005) during headless GroundStation teardown.
+    """
+
+    def __init__(self, stub, parent=None):
+        super().__init__(parent)
+        self.stub = stub
+        self._lock = threading.Lock()
+        self._running = True
+        self._stopped = False   # stop requested — set even before _call exists
+        self._call = None
+
+    # ── subclass hooks ──
+    def _open(self):
+        raise NotImplementedError
+
+    def _emit(self, msg):
+        raise NotImplementedError
+
+    def _on_rpc_error(self, e):
+        pass
+
+    def _on_other_error(self, e):
+        pass
+
+    @staticmethod
+    def _safe_cancel(call):
+        try:
+            call.cancel()
+        except Exception:
+            pass
+
+    def run(self):
+        with self._lock:
+            if self._stopped:
+                return                       # stop() won the race — never open a stream
+            call = self._open()
+            self._call = call
+            if self._stopped:                # stop() raced in during _open(): cancel now
+                self._safe_cancel(call)
+        try:
+            for msg in call:
+                if not self._running:
+                    break
+                self._emit(msg)
+        except grpc.RpcError as e:
+            self._on_rpc_error(e)
+        except Exception as e:  # pragma: no cover
+            self._on_other_error(e)
+        finally:
+            with self._lock:
+                self._call = None
+
+    def stop(self):
+        """Request shutdown.  Idempotent and safe before ``run()`` opens the stream."""
+        with self._lock:
+            self._running = False
+            self._stopped = True
+            call = self._call
+        if call is not None:
+            self._safe_cancel(call)
+
+    def shutdown(self, timeout_ms=2000):
+        """Stop and join.  Returns True only once the worker has fully exited so
+        the caller can prove it is safe to close the owning gRPC channel."""
+        self.stop()
+        if not self.isRunning():
+            return True
+        return self.wait(timeout_ms)
+
+
+class TelemetryThread(_StreamThread):
     """subscribe telemetry stream ใน thread แยก → emit signal ต่อ 1 snapshot"""
     telemetry = pyqtSignal(object)   # telemetry_pb2.Telemetry
     stream_error = pyqtSignal(str)
 
-    def __init__(self, stub, parent=None):
-        super().__init__(parent)
-        self.stub = stub
-        self._running = True
-        self._call = None
+    def _open(self):
+        return self.stub.SubscribeTelemetry(
+            telemetry_pb2.SubscribeTelemetryRequest())
 
-    def run(self):
-        try:
-            self._call = self.stub.SubscribeTelemetry(
-                telemetry_pb2.SubscribeTelemetryRequest())
-            for t in self._call:
-                if not self._running:
-                    break
-                self.telemetry.emit(t)
-        except grpc.RpcError as e:
-            if self._running:
-                self.stream_error.emit(f"{e.code().name}: {e.details()}")
-        except Exception as e:  # pragma: no cover
-            if self._running:
-                self.stream_error.emit(str(e))
+    def _emit(self, msg):
+        self.telemetry.emit(msg)
 
-    def stop(self):
-        self._running = False
-        if self._call is not None:
-            self._call.cancel()
+    def _on_rpc_error(self, e):
+        if self._running:
+            self.stream_error.emit(f"{e.code().name}: {e.details()}")
+
+    def _on_other_error(self, e):
+        if self._running:
+            self.stream_error.emit(str(e))
 
 
-class EventThread(QThread):
+class EventThread(_StreamThread):
     """subscribe event/alarm stream (failsafe, failover, geofence) → emit signal"""
     event = pyqtSignal(object)  # pb.Event
 
-    def __init__(self, stub, parent=None):
-        super().__init__(parent)
-        self.stub = stub
-        self._running = True
-        self._call = None
+    def _open(self):
+        return self.stub.SubscribeEvents(service_pb2.EventSubscribeRequest())
 
-    def run(self):
-        try:
-            self._call = self.stub.SubscribeEvents(service_pb2.EventSubscribeRequest())
-            for ev in self._call:
-                if not self._running:
-                    break
-                self.event.emit(ev)
-        except grpc.RpcError:
-            pass
-
-    def stop(self):
-        self._running = False
-        if self._call is not None:
-            self._call.cancel()
+    def _emit(self, msg):
+        self.event.emit(msg)

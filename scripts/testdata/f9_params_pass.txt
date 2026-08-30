@@ -1,0 +1,8 @@
+# Synthetic F9A pipeline fixture only — not hardware evidence.
+MAV_GCS_SYSID=255
+FS_GCS_ENABLE=1
+ARMING_SKIPCHK=0
+BATT_FS_CRT_ACT=2
+BATT_FS_LOW_ACT=2
+FS_OPTIONS=16
+FENCE_ENABLE=1

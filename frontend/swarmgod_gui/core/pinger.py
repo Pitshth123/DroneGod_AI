@@ -8,6 +8,7 @@ import platform
 import re
 import socket
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -32,8 +33,14 @@ _TIME_RE = re.compile(
 )
 
 
-def icmp_ping(host: str, timeout_ms: int = 1200) -> tuple[bool, Optional[float], str]:
-    """ส่ง ICMP echo 1 ครั้ง คืน (ok, rtt_ms, detail)"""
+def icmp_ping(host: str, timeout_ms: int = 1200,
+              cancel_event: Optional[threading.Event] = None) -> tuple[bool, Optional[float], str]:
+    """ส่ง ICMP echo 1 ครั้ง คืน (ok, rtt_ms, detail).
+
+    ``cancel_event`` lets a closing cockpit terminate the child process and join
+    the PingWorker deterministically instead of destroying a live QThread that is
+    still blocked inside ``subprocess.run`` / its Windows pipe reader threads.
+    """
     if not host:
         return False, None, "no host"
     system = platform.system().lower()
@@ -45,19 +52,52 @@ def icmp_ping(host: str, timeout_ms: int = 1200) -> tuple[bool, Optional[float],
             # -c 1, -W timeout seconds (Linux)
             sec = max(1, int(round(timeout_ms / 1000.0)))
             cmd = ["ping", "-c", "1", "-W", str(sec), host]
-        r = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=(timeout_ms / 1000.0) + 2.0,
+
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             creationflags=subprocess.CREATE_NO_WINDOW if system == "windows" else 0,
         )
-        out = (r.stdout or "") + (r.stderr or "")
-        m = _TIME_RE.search(out)
+        deadline = time.monotonic() + (timeout_ms / 1000.0) + 2.0
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+                try:
+                    proc.communicate(timeout=0.5)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    try:
+                        proc.communicate(timeout=0.5)
+                    except Exception:
+                        pass
+                return False, None, "icmp cancelled"
+            try:
+                out, err = proc.communicate(timeout=0.05)
+                break
+            except subprocess.TimeoutExpired:
+                if time.monotonic() >= deadline:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    try:
+                        proc.communicate(timeout=0.5)
+                    except Exception:
+                        pass
+                    return False, None, "icmp timeout"
+
+        text = (out or "") + (err or "")
+        m = _TIME_RE.search(text)
         if m:
             ms = float(m.group(1).replace(",", "."))
             return True, ms, f"icmp {ms:.0f} ms"
-        if r.returncode == 0:
+        if proc.returncode == 0:
             return True, None, "icmp ok"
-        return False, None, "icmp timeout"
-    except subprocess.TimeoutExpired:
         return False, None, "icmp timeout"
     except Exception as e:
         return False, None, f"icmp err: {e}"
@@ -76,17 +116,22 @@ def tcp_probe(host: str, port: int, timeout_s: float = 1.2) -> tuple[bool, Optio
         return False, None, f"tcp fail: {e}"
 
 
-def probe(host: str, port: int = 0, timeout_ms: int = 1200) -> PingResult:
-    """ลอง ICMP ก่อน ถ้าไม่ได้ใช้ TCP เป็น fallback"""
+def probe(host: str, port: int = 0, timeout_ms: int = 1200,
+          cancel_event: Optional[threading.Event] = None) -> PingResult:
+    """ลอง ICMP ก่อน ถ้าไม่ได้ใช้ TCP เป็น fallback."""
     host = (host or "").strip()
     if not host:
         return PingResult(host="", ok=False, ms=None, tcp_ms=None,
                           port=port, method="fail", detail="no host")
 
-    ok_i, ms_i, det_i = icmp_ping(host, timeout_ms=timeout_ms)
+    ok_i, ms_i, det_i = icmp_ping(host, timeout_ms=timeout_ms,
+                                  cancel_event=cancel_event)
     if ok_i:
         return PingResult(host=host, ok=True, ms=ms_i, tcp_ms=None,
                           port=port, method="icmp", detail=det_i)
+    if cancel_event is not None and cancel_event.is_set():
+        return PingResult(host=host, ok=False, ms=None, tcp_ms=None,
+                          port=port, method="fail", detail="cancelled")
 
     if port:
         ok_t, ms_t, det_t = tcp_probe(host, port, timeout_s=timeout_ms / 1000.0)
@@ -102,7 +147,7 @@ def probe(host: str, port: int = 0, timeout_ms: int = 1200) -> PingResult:
 
 
 class PingWorker(QThread):
-    """QThread ปิงครั้งเดียว แล้วจบ"""
+    """QThread ปิงครั้งเดียว แล้วจบ — ยกเลิกได้ระหว่าง cockpit shutdown."""
     finished_result = pyqtSignal(int, object)  # drone_id, PingResult
 
     def __init__(self, drone_id: int, host: str, port: int = 0, parent=None):
@@ -110,19 +155,26 @@ class PingWorker(QThread):
         self.drone_id = drone_id
         self.host = host
         self.port = port
+        self._cancel_event = threading.Event()
+
+    def cancel(self):
+        self._cancel_event.set()
+        self.requestInterruption()
 
     def run(self):
-        res = probe(self.host, self.port)
-        self.finished_result.emit(self.drone_id, res)
+        res = probe(self.host, self.port, cancel_event=self._cancel_event)
+        if not self._cancel_event.is_set():
+            self.finished_result.emit(self.drone_id, res)
 
 
 class PingService(QObject):
-    """คิวปิงไม่ซ้อน — ปิงทีละ host"""
+    """คิวปิงไม่ซ้อน — ปิงทีละ host และ shutdown worker แบบ deterministic."""
     result = pyqtSignal(int, object)  # drone_id, PingResult
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._busy = False
+        self._closing = False
         self._worker: Optional[PingWorker] = None
 
     @property
@@ -130,7 +182,7 @@ class PingService(QObject):
         return self._busy
 
     def ping(self, drone_id: int, host: str, port: int = 0) -> bool:
-        if self._busy or not host:
+        if self._closing or self._busy or not host:
             return False
         self._busy = True
         w = PingWorker(drone_id, host, port, parent=self)
@@ -141,8 +193,28 @@ class PingService(QObject):
 
     def _on_done(self, drone_id: int, res: PingResult):
         self._busy = False
-        self.result.emit(drone_id, res)
         w = self._worker
         self._worker = None
+        if not self._closing:
+            self.result.emit(drone_id, res)
         if w is not None:
             w.deleteLater()
+
+    def shutdown(self, timeout_ms: int = 4000) -> bool:
+        """Cancel and join the active PingWorker before this QObject is destroyed."""
+        self._closing = True
+        w = self._worker
+        if w is None:
+            self._busy = False
+            return True
+        try:
+            w.finished_result.disconnect(self._on_done)
+        except (TypeError, RuntimeError):
+            pass
+        w.cancel()
+        stopped = bool(w.wait(max(0, int(timeout_ms))))
+        if stopped:
+            self._worker = None
+            self._busy = False
+            w.deleteLater()
+        return stopped

@@ -189,6 +189,174 @@ func (MissionRunState) EnumDescriptor() ([]byte, []int) {
 	return file_swarmgod_v1_mission_proto_rawDescGZIP(), []int{2}
 }
 
+// Normal post-mission ownership policy. This is deliberately distinct from
+// failsafe/operator RTL and from the legacy compatibility bool.
+type MissionReturnPolicy int32
+
+const (
+	MissionReturnPolicy_MISSION_RETURN_POLICY_UNSPECIFIED           MissionReturnPolicy = 0
+	MissionReturnPolicy_MISSION_RETURN_POLICY_NONE                  MissionReturnPolicy = 1
+	MissionReturnPolicy_MISSION_RETURN_POLICY_RTL_ALL_AFTER_MISSION MissionReturnPolicy = 2
+	MissionReturnPolicy_MISSION_RETURN_POLICY_SWARM_RETURN          MissionReturnPolicy = 3
+	MissionReturnPolicy_MISSION_RETURN_POLICY_WAVE_MANAGED_RETURN   MissionReturnPolicy = 4
+)
+
+// Enum value maps for MissionReturnPolicy.
+var (
+	MissionReturnPolicy_name = map[int32]string{
+		0: "MISSION_RETURN_POLICY_UNSPECIFIED",
+		1: "MISSION_RETURN_POLICY_NONE",
+		2: "MISSION_RETURN_POLICY_RTL_ALL_AFTER_MISSION",
+		3: "MISSION_RETURN_POLICY_SWARM_RETURN",
+		4: "MISSION_RETURN_POLICY_WAVE_MANAGED_RETURN",
+	}
+	MissionReturnPolicy_value = map[string]int32{
+		"MISSION_RETURN_POLICY_UNSPECIFIED":           0,
+		"MISSION_RETURN_POLICY_NONE":                  1,
+		"MISSION_RETURN_POLICY_RTL_ALL_AFTER_MISSION": 2,
+		"MISSION_RETURN_POLICY_SWARM_RETURN":          3,
+		"MISSION_RETURN_POLICY_WAVE_MANAGED_RETURN":   4,
+	}
+)
+
+func (x MissionReturnPolicy) Enum() *MissionReturnPolicy {
+	p := new(MissionReturnPolicy)
+	*p = x
+	return p
+}
+
+func (x MissionReturnPolicy) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (MissionReturnPolicy) Descriptor() protoreflect.EnumDescriptor {
+	return file_swarmgod_v1_mission_proto_enumTypes[3].Descriptor()
+}
+
+func (MissionReturnPolicy) Type() protoreflect.EnumType {
+	return &file_swarmgod_v1_mission_proto_enumTypes[3]
+}
+
+func (x MissionReturnPolicy) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use MissionReturnPolicy.Descriptor instead.
+func (MissionReturnPolicy) EnumDescriptor() ([]byte, []int) {
+	return file_swarmgod_v1_mission_proto_rawDescGZIP(), []int{3}
+}
+
+type MissionSeparateReturnTiming int32
+
+const (
+	MissionSeparateReturnTiming_MISSION_SEPARATE_RETURN_TIMING_UNSPECIFIED      MissionSeparateReturnTiming = 0
+	MissionSeparateReturnTiming_MISSION_SEPARATE_RETURN_ALL_ON_MISSION_COMPLETE MissionSeparateReturnTiming = 1
+	// Reserved for a later return-corridor safety contract. Core rejects it.
+	MissionSeparateReturnTiming_MISSION_SEPARATE_RETURN_EACH_ON_ROUTE_COMPLETE MissionSeparateReturnTiming = 2
+)
+
+// Enum value maps for MissionSeparateReturnTiming.
+var (
+	MissionSeparateReturnTiming_name = map[int32]string{
+		0: "MISSION_SEPARATE_RETURN_TIMING_UNSPECIFIED",
+		1: "MISSION_SEPARATE_RETURN_ALL_ON_MISSION_COMPLETE",
+		2: "MISSION_SEPARATE_RETURN_EACH_ON_ROUTE_COMPLETE",
+	}
+	MissionSeparateReturnTiming_value = map[string]int32{
+		"MISSION_SEPARATE_RETURN_TIMING_UNSPECIFIED":      0,
+		"MISSION_SEPARATE_RETURN_ALL_ON_MISSION_COMPLETE": 1,
+		"MISSION_SEPARATE_RETURN_EACH_ON_ROUTE_COMPLETE":  2,
+	}
+)
+
+func (x MissionSeparateReturnTiming) Enum() *MissionSeparateReturnTiming {
+	p := new(MissionSeparateReturnTiming)
+	*p = x
+	return p
+}
+
+func (x MissionSeparateReturnTiming) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (MissionSeparateReturnTiming) Descriptor() protoreflect.EnumDescriptor {
+	return file_swarmgod_v1_mission_proto_enumTypes[4].Descriptor()
+}
+
+func (MissionSeparateReturnTiming) Type() protoreflect.EnumType {
+	return &file_swarmgod_v1_mission_proto_enumTypes[4]
+}
+
+func (x MissionSeparateReturnTiming) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use MissionSeparateReturnTiming.Descriptor instead.
+func (MissionSeparateReturnTiming) EnumDescriptor() ([]byte, []int) {
+	return file_swarmgod_v1_mission_proto_rawDescGZIP(), []int{4}
+}
+
+type MissionReturnState int32
+
+const (
+	MissionReturnState_MISSION_RETURN_STATE_INACTIVE          MissionReturnState = 0
+	MissionReturnState_MISSION_RETURN_STATE_PENDING           MissionReturnState = 1
+	MissionReturnState_MISSION_RETURN_STATE_RETURNING         MissionReturnState = 2
+	MissionReturnState_MISSION_RETURN_STATE_COMPLETED         MissionReturnState = 3
+	MissionReturnState_MISSION_RETURN_STATE_SUPPRESSED        MissionReturnState = 4
+	MissionReturnState_MISSION_RETURN_STATE_FAILED            MissionReturnState = 5
+	MissionReturnState_MISSION_RETURN_STATE_RECOVERY_REQUIRED MissionReturnState = 6
+)
+
+// Enum value maps for MissionReturnState.
+var (
+	MissionReturnState_name = map[int32]string{
+		0: "MISSION_RETURN_STATE_INACTIVE",
+		1: "MISSION_RETURN_STATE_PENDING",
+		2: "MISSION_RETURN_STATE_RETURNING",
+		3: "MISSION_RETURN_STATE_COMPLETED",
+		4: "MISSION_RETURN_STATE_SUPPRESSED",
+		5: "MISSION_RETURN_STATE_FAILED",
+		6: "MISSION_RETURN_STATE_RECOVERY_REQUIRED",
+	}
+	MissionReturnState_value = map[string]int32{
+		"MISSION_RETURN_STATE_INACTIVE":          0,
+		"MISSION_RETURN_STATE_PENDING":           1,
+		"MISSION_RETURN_STATE_RETURNING":         2,
+		"MISSION_RETURN_STATE_COMPLETED":         3,
+		"MISSION_RETURN_STATE_SUPPRESSED":        4,
+		"MISSION_RETURN_STATE_FAILED":            5,
+		"MISSION_RETURN_STATE_RECOVERY_REQUIRED": 6,
+	}
+)
+
+func (x MissionReturnState) Enum() *MissionReturnState {
+	p := new(MissionReturnState)
+	*p = x
+	return p
+}
+
+func (x MissionReturnState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (MissionReturnState) Descriptor() protoreflect.EnumDescriptor {
+	return file_swarmgod_v1_mission_proto_enumTypes[5].Descriptor()
+}
+
+func (MissionReturnState) Type() protoreflect.EnumType {
+	return &file_swarmgod_v1_mission_proto_enumTypes[5]
+}
+
+func (x MissionReturnState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use MissionReturnState.Descriptor instead.
+func (MissionReturnState) EnumDescriptor() ([]byte, []int) {
+	return file_swarmgod_v1_mission_proto_rawDescGZIP(), []int{5}
+}
+
 type MissionWaypoint struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Seq           int32                  `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`
@@ -326,16 +494,19 @@ func (x *MissionRoute) GetPoints() []*MissionWaypoint {
 }
 
 type MissionPlan struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	PlanId         string                 `protobuf:"bytes,1,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"` // immutable plan identity (client-generated)
-	Mode           MissionMode            `protobuf:"varint,2,opt,name=mode,proto3,enum=swarmgod.v1.MissionMode" json:"mode,omitempty"`
-	Participants   []uint32               `protobuf:"varint,3,rep,packed,name=participants,proto3" json:"participants,omitempty"`
-	Routes         []*MissionRoute        `protobuf:"bytes,4,rep,name=routes,proto3" json:"routes,omitempty"`
-	LeaderId       uint32                 `protobuf:"varint,5,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`                      // SWARM_LEADER only
-	ArrivalRadiusM float64                `protobuf:"fixed64,6,opt,name=arrival_radius_m,json=arrivalRadiusM,proto3" json:"arrival_radius_m,omitempty"` // 0 = default 3.0m (ย้ายจาก map.html TGT_REACH_M)
-	RtlAfter       bool                   `protobuf:"varint,7,opt,name=rtl_after,json=rtlAfter,proto3" json:"rtl_after,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state                protoimpl.MessageState      `protogen:"open.v1"`
+	PlanId               string                      `protobuf:"bytes,1,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"` // immutable plan identity (client-generated)
+	Mode                 MissionMode                 `protobuf:"varint,2,opt,name=mode,proto3,enum=swarmgod.v1.MissionMode" json:"mode,omitempty"`
+	Participants         []uint32                    `protobuf:"varint,3,rep,packed,name=participants,proto3" json:"participants,omitempty"`
+	Routes               []*MissionRoute             `protobuf:"bytes,4,rep,name=routes,proto3" json:"routes,omitempty"`
+	LeaderId             uint32                      `protobuf:"varint,5,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`                      // SWARM_LEADER only
+	ArrivalRadiusM       float64                     `protobuf:"fixed64,6,opt,name=arrival_radius_m,json=arrivalRadiusM,proto3" json:"arrival_radius_m,omitempty"` // 0 = default 3.0m (ย้ายจาก map.html TGT_REACH_M)
+	RtlAfter             bool                        `protobuf:"varint,7,opt,name=rtl_after,json=rtlAfter,proto3" json:"rtl_after,omitempty"`
+	ParticipantAltitudes map[uint32]float64          `protobuf:"bytes,8,rep,name=participant_altitudes,json=participantAltitudes,proto3" json:"participant_altitudes,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"fixed64,2,opt,name=value"` // frozen per-drone mission altitude (GROUPED compatibility)
+	ReturnPolicy         MissionReturnPolicy         `protobuf:"varint,9,opt,name=return_policy,json=returnPolicy,proto3,enum=swarmgod.v1.MissionReturnPolicy" json:"return_policy,omitempty"`                                                                // UNSPECIFIED maps rtl_after compatibly
+	SeparateReturnTiming MissionSeparateReturnTiming `protobuf:"varint,10,opt,name=separate_return_timing,json=separateReturnTiming,proto3,enum=swarmgod.v1.MissionSeparateReturnTiming" json:"separate_return_timing,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *MissionPlan) Reset() {
@@ -417,6 +588,27 @@ func (x *MissionPlan) GetRtlAfter() bool {
 	return false
 }
 
+func (x *MissionPlan) GetParticipantAltitudes() map[uint32]float64 {
+	if x != nil {
+		return x.ParticipantAltitudes
+	}
+	return nil
+}
+
+func (x *MissionPlan) GetReturnPolicy() MissionReturnPolicy {
+	if x != nil {
+		return x.ReturnPolicy
+	}
+	return MissionReturnPolicy_MISSION_RETURN_POLICY_UNSPECIFIED
+}
+
+func (x *MissionPlan) GetSeparateReturnTiming() MissionSeparateReturnTiming {
+	if x != nil {
+		return x.SeparateReturnTiming
+	}
+	return MissionSeparateReturnTiming_MISSION_SEPARATE_RETURN_TIMING_UNSPECIFIED
+}
+
 type StartMissionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Plan          *MissionPlan           `protobuf:"bytes,1,opt,name=plan,proto3" json:"plan,omitempty"`
@@ -470,13 +662,14 @@ func (x *StartMissionRequest) GetOperationId() string {
 }
 
 type StartMissionResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	RunId         uint64                 `protobuf:"varint,3,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"` // Core-generated run identity
-	State         MissionRunState        `protobuf:"varint,4,opt,name=state,proto3,enum=swarmgod.v1.MissionRunState" json:"state,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Ok              bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Message         string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	RunId           uint64                 `protobuf:"varint,3,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"` // Core-generated run identity
+	State           MissionRunState        `protobuf:"varint,4,opt,name=state,proto3,enum=swarmgod.v1.MissionRunState" json:"state,omitempty"`
+	AuthorityActive bool                   `protobuf:"varint,5,opt,name=authority_active,json=authorityActive,proto3" json:"authority_active,omitempty"` // true only when this run's GOTO owner is Go Core
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *StartMissionResponse) Reset() {
@@ -535,6 +728,13 @@ func (x *StartMissionResponse) GetState() MissionRunState {
 		return x.State
 	}
 	return MissionRunState_MISSION_STATE_IDLE
+}
+
+func (x *StartMissionResponse) GetAuthorityActive() bool {
+	if x != nil {
+		return x.AuthorityActive
+	}
+	return false
 }
 
 type CancelMissionRequest struct {
@@ -693,28 +893,124 @@ func (x *MissionWait) GetTotalS() int32 {
 	return 0
 }
 
+type MissionParticipantRejection struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RunId         uint64                 `protobuf:"varint,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	WaypointIndex int32                  `protobuf:"varint,2,opt,name=waypoint_index,json=waypointIndex,proto3" json:"waypoint_index,omitempty"`
+	DroneId       uint32                 `protobuf:"varint,3,opt,name=drone_id,json=droneId,proto3" json:"drone_id,omitempty"`
+	Reason        string                 `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MissionParticipantRejection) Reset() {
+	*x = MissionParticipantRejection{}
+	mi := &file_swarmgod_v1_mission_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MissionParticipantRejection) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MissionParticipantRejection) ProtoMessage() {}
+
+func (x *MissionParticipantRejection) ProtoReflect() protoreflect.Message {
+	mi := &file_swarmgod_v1_mission_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MissionParticipantRejection.ProtoReflect.Descriptor instead.
+func (*MissionParticipantRejection) Descriptor() ([]byte, []int) {
+	return file_swarmgod_v1_mission_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *MissionParticipantRejection) GetRunId() uint64 {
+	if x != nil {
+		return x.RunId
+	}
+	return 0
+}
+
+func (x *MissionParticipantRejection) GetWaypointIndex() int32 {
+	if x != nil {
+		return x.WaypointIndex
+	}
+	return 0
+}
+
+func (x *MissionParticipantRejection) GetDroneId() uint32 {
+	if x != nil {
+		return x.DroneId
+	}
+	return 0
+}
+
+func (x *MissionParticipantRejection) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 type MissionStateResponse struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Active         bool                   `protobuf:"varint,1,opt,name=active,proto3" json:"active,omitempty"`
-	RunId          uint64                 `protobuf:"varint,2,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	PlanId         string                 `protobuf:"bytes,3,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
-	Mode           MissionMode            `protobuf:"varint,4,opt,name=mode,proto3,enum=swarmgod.v1.MissionMode" json:"mode,omitempty"`
-	State          MissionRunState        `protobuf:"varint,5,opt,name=state,proto3,enum=swarmgod.v1.MissionRunState" json:"state,omitempty"`
-	Revision       uint64                 `protobuf:"varint,6,opt,name=revision,proto3" json:"revision,omitempty"` // เพิ่มทุก transition — UI ตรวจว่าเห็น state ล่าสุด
-	Participants   []uint32               `protobuf:"varint,7,rep,packed,name=participants,proto3" json:"participants,omitempty"`
-	CurrentIndex   int32                  `protobuf:"varint,8,opt,name=current_index,json=currentIndex,proto3" json:"current_index,omitempty"`                                                                // GROUPED / SWARM_LEADER
-	SepIndex       map[uint32]int32       `protobuf:"bytes,9,rep,name=sep_index,json=sepIndex,proto3" json:"sep_index,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"` // SEPARATE
-	Arrived        []uint32               `protobuf:"varint,10,rep,packed,name=arrived,proto3" json:"arrived,omitempty"`
-	Waits          []*MissionWait         `protobuf:"bytes,11,rep,name=waits,proto3" json:"waits,omitempty"`
-	LastTransition string                 `protobuf:"bytes,12,opt,name=last_transition,json=lastTransition,proto3" json:"last_transition,omitempty"`
-	TerminalReason string                 `protobuf:"bytes,13,opt,name=terminal_reason,json=terminalReason,proto3" json:"terminal_reason,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state                 protoimpl.MessageState         `protogen:"open.v1"`
+	Active                bool                           `protobuf:"varint,1,opt,name=active,proto3" json:"active,omitempty"`
+	RunId                 uint64                         `protobuf:"varint,2,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	PlanId                string                         `protobuf:"bytes,3,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
+	Mode                  MissionMode                    `protobuf:"varint,4,opt,name=mode,proto3,enum=swarmgod.v1.MissionMode" json:"mode,omitempty"`
+	State                 MissionRunState                `protobuf:"varint,5,opt,name=state,proto3,enum=swarmgod.v1.MissionRunState" json:"state,omitempty"`
+	Revision              uint64                         `protobuf:"varint,6,opt,name=revision,proto3" json:"revision,omitempty"` // เพิ่มทุก transition — UI ตรวจว่าเห็น state ล่าสุด
+	Participants          []uint32                       `protobuf:"varint,7,rep,packed,name=participants,proto3" json:"participants,omitempty"`
+	CurrentIndex          int32                          `protobuf:"varint,8,opt,name=current_index,json=currentIndex,proto3" json:"current_index,omitempty"`                                                                // GROUPED / SWARM_LEADER
+	SepIndex              map[uint32]int32               `protobuf:"bytes,9,rep,name=sep_index,json=sepIndex,proto3" json:"sep_index,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"` // SEPARATE
+	Arrived               []uint32                       `protobuf:"varint,10,rep,packed,name=arrived,proto3" json:"arrived,omitempty"`
+	Waits                 []*MissionWait                 `protobuf:"bytes,11,rep,name=waits,proto3" json:"waits,omitempty"`
+	LastTransition        string                         `protobuf:"bytes,12,opt,name=last_transition,json=lastTransition,proto3" json:"last_transition,omitempty"`
+	TerminalReason        string                         `protobuf:"bytes,13,opt,name=terminal_reason,json=terminalReason,proto3" json:"terminal_reason,omitempty"`
+	AuthorityActive       bool                           `protobuf:"varint,14,opt,name=authority_active,json=authorityActive,proto3" json:"authority_active,omitempty"` // true only while Go Core owns waypoint GOTO for this run
+	Plan                  *MissionPlan                   `protobuf:"bytes,15,opt,name=plan,proto3" json:"plan,omitempty"`                                               // frozen plan snapshot for restartable cockpit rebuild
+	ParticipantRejections []*MissionParticipantRejection `protobuf:"bytes,16,rep,name=participant_rejections,json=participantRejections,proto3" json:"participant_rejections,omitempty"`
+	// V3-S10 durable restart evidence. recovery_required is command-inert:
+	// active/authority_active MUST both be false until explicit operator clear.
+	RecoveryRequired         bool                `protobuf:"varint,17,opt,name=recovery_required,json=recoveryRequired,proto3" json:"recovery_required,omitempty"`
+	RecoveryPreviousState    MissionRunState     `protobuf:"varint,18,opt,name=recovery_previous_state,json=recoveryPreviousState,proto3,enum=swarmgod.v1.MissionRunState" json:"recovery_previous_state,omitempty"`
+	RecoveryReason           string              `protobuf:"bytes,19,opt,name=recovery_reason,json=recoveryReason,proto3" json:"recovery_reason,omitempty"`
+	PersistenceSchemaVersion uint32              `protobuf:"varint,20,opt,name=persistence_schema_version,json=persistenceSchemaVersion,proto3" json:"persistence_schema_version,omitempty"`
+	PersistedRevision        uint64              `protobuf:"varint,21,opt,name=persisted_revision,json=persistedRevision,proto3" json:"persisted_revision,omitempty"`
+	AuthorityScope           string              `protobuf:"bytes,22,opt,name=authority_scope,json=authorityScope,proto3" json:"authority_scope,omitempty"`
+	OriginSessionId          string              `protobuf:"bytes,23,opt,name=origin_session_id,json=originSessionId,proto3" json:"origin_session_id,omitempty"`
+	CoreSessionId            string              `protobuf:"bytes,24,opt,name=core_session_id,json=coreSessionId,proto3" json:"core_session_id,omitempty"`
+	PersistenceCompatible    bool                `protobuf:"varint,25,opt,name=persistence_compatible,json=persistenceCompatible,proto3" json:"persistence_compatible,omitempty"`
+	PersistenceFault         string              `protobuf:"bytes,26,opt,name=persistence_fault,json=persistenceFault,proto3" json:"persistence_fault,omitempty"`
+	OperationId              string              `protobuf:"bytes,27,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	ResolvedReturnPolicy     MissionReturnPolicy `protobuf:"varint,28,opt,name=resolved_return_policy,json=resolvedReturnPolicy,proto3,enum=swarmgod.v1.MissionReturnPolicy" json:"resolved_return_policy,omitempty"`
+	ReturnState              MissionReturnState  `protobuf:"varint,29,opt,name=return_state,json=returnState,proto3,enum=swarmgod.v1.MissionReturnState" json:"return_state,omitempty"`
+	ReturnParticipants       []uint32            `protobuf:"varint,30,rep,packed,name=return_participants,json=returnParticipants,proto3" json:"return_participants,omitempty"`
+	ReturnReason             string              `protobuf:"bytes,31,opt,name=return_reason,json=returnReason,proto3" json:"return_reason,omitempty"`
+	// V3-S09-C current in-run SWARM_LEADER ownership. plan.leader_id and
+	// participants remain the immutable original operator plan.
+	CurrentLeaderId      uint32   `protobuf:"varint,32,opt,name=current_leader_id,json=currentLeaderId,proto3" json:"current_leader_id,omitempty"`
+	ActiveParticipants   []uint32 `protobuf:"varint,33,rep,packed,name=active_participants,json=activeParticipants,proto3" json:"active_participants,omitempty"`
+	ExcludedParticipants []uint32 `protobuf:"varint,34,rep,packed,name=excluded_participants,json=excludedParticipants,proto3" json:"excluded_participants,omitempty"`
+	SuccessionReason     string   `protobuf:"bytes,35,opt,name=succession_reason,json=successionReason,proto3" json:"succession_reason,omitempty"`
+	SwarmGeneration      uint64   `protobuf:"varint,36,opt,name=swarm_generation,json=swarmGeneration,proto3" json:"swarm_generation,omitempty"`
+	SuccessionPending    bool     `protobuf:"varint,37,opt,name=succession_pending,json=successionPending,proto3" json:"succession_pending,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *MissionStateResponse) Reset() {
 	*x = MissionStateResponse{}
-	mi := &file_swarmgod_v1_mission_proto_msgTypes[8]
+	mi := &file_swarmgod_v1_mission_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -726,7 +1022,7 @@ func (x *MissionStateResponse) String() string {
 func (*MissionStateResponse) ProtoMessage() {}
 
 func (x *MissionStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_swarmgod_v1_mission_proto_msgTypes[8]
+	mi := &file_swarmgod_v1_mission_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -739,7 +1035,7 @@ func (x *MissionStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MissionStateResponse.ProtoReflect.Descriptor instead.
 func (*MissionStateResponse) Descriptor() ([]byte, []int) {
-	return file_swarmgod_v1_mission_proto_rawDescGZIP(), []int{8}
+	return file_swarmgod_v1_mission_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *MissionStateResponse) GetActive() bool {
@@ -833,6 +1129,174 @@ func (x *MissionStateResponse) GetTerminalReason() string {
 	return ""
 }
 
+func (x *MissionStateResponse) GetAuthorityActive() bool {
+	if x != nil {
+		return x.AuthorityActive
+	}
+	return false
+}
+
+func (x *MissionStateResponse) GetPlan() *MissionPlan {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
+}
+
+func (x *MissionStateResponse) GetParticipantRejections() []*MissionParticipantRejection {
+	if x != nil {
+		return x.ParticipantRejections
+	}
+	return nil
+}
+
+func (x *MissionStateResponse) GetRecoveryRequired() bool {
+	if x != nil {
+		return x.RecoveryRequired
+	}
+	return false
+}
+
+func (x *MissionStateResponse) GetRecoveryPreviousState() MissionRunState {
+	if x != nil {
+		return x.RecoveryPreviousState
+	}
+	return MissionRunState_MISSION_STATE_IDLE
+}
+
+func (x *MissionStateResponse) GetRecoveryReason() string {
+	if x != nil {
+		return x.RecoveryReason
+	}
+	return ""
+}
+
+func (x *MissionStateResponse) GetPersistenceSchemaVersion() uint32 {
+	if x != nil {
+		return x.PersistenceSchemaVersion
+	}
+	return 0
+}
+
+func (x *MissionStateResponse) GetPersistedRevision() uint64 {
+	if x != nil {
+		return x.PersistedRevision
+	}
+	return 0
+}
+
+func (x *MissionStateResponse) GetAuthorityScope() string {
+	if x != nil {
+		return x.AuthorityScope
+	}
+	return ""
+}
+
+func (x *MissionStateResponse) GetOriginSessionId() string {
+	if x != nil {
+		return x.OriginSessionId
+	}
+	return ""
+}
+
+func (x *MissionStateResponse) GetCoreSessionId() string {
+	if x != nil {
+		return x.CoreSessionId
+	}
+	return ""
+}
+
+func (x *MissionStateResponse) GetPersistenceCompatible() bool {
+	if x != nil {
+		return x.PersistenceCompatible
+	}
+	return false
+}
+
+func (x *MissionStateResponse) GetPersistenceFault() string {
+	if x != nil {
+		return x.PersistenceFault
+	}
+	return ""
+}
+
+func (x *MissionStateResponse) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *MissionStateResponse) GetResolvedReturnPolicy() MissionReturnPolicy {
+	if x != nil {
+		return x.ResolvedReturnPolicy
+	}
+	return MissionReturnPolicy_MISSION_RETURN_POLICY_UNSPECIFIED
+}
+
+func (x *MissionStateResponse) GetReturnState() MissionReturnState {
+	if x != nil {
+		return x.ReturnState
+	}
+	return MissionReturnState_MISSION_RETURN_STATE_INACTIVE
+}
+
+func (x *MissionStateResponse) GetReturnParticipants() []uint32 {
+	if x != nil {
+		return x.ReturnParticipants
+	}
+	return nil
+}
+
+func (x *MissionStateResponse) GetReturnReason() string {
+	if x != nil {
+		return x.ReturnReason
+	}
+	return ""
+}
+
+func (x *MissionStateResponse) GetCurrentLeaderId() uint32 {
+	if x != nil {
+		return x.CurrentLeaderId
+	}
+	return 0
+}
+
+func (x *MissionStateResponse) GetActiveParticipants() []uint32 {
+	if x != nil {
+		return x.ActiveParticipants
+	}
+	return nil
+}
+
+func (x *MissionStateResponse) GetExcludedParticipants() []uint32 {
+	if x != nil {
+		return x.ExcludedParticipants
+	}
+	return nil
+}
+
+func (x *MissionStateResponse) GetSuccessionReason() string {
+	if x != nil {
+		return x.SuccessionReason
+	}
+	return ""
+}
+
+func (x *MissionStateResponse) GetSwarmGeneration() uint64 {
+	if x != nil {
+		return x.SwarmGeneration
+	}
+	return 0
+}
+
+func (x *MissionStateResponse) GetSuccessionPending() bool {
+	if x != nil {
+		return x.SuccessionPending
+	}
+	return false
+}
+
 var File_swarmgod_v1_mission_proto protoreflect.FileDescriptor
 
 const file_swarmgod_v1_mission_proto_rawDesc = "" +
@@ -847,7 +1311,7 @@ const file_swarmgod_v1_mission_proto_rawDesc = "" +
 	"\x06action\x18\x06 \x01(\x0e2\x1c.swarmgod.v1.MissionWpActionR\x06action\"_\n" +
 	"\fMissionRoute\x12\x19\n" +
 	"\bdrone_id\x18\x01 \x01(\rR\adroneId\x124\n" +
-	"\x06points\x18\x02 \x03(\v2\x1c.swarmgod.v1.MissionWaypointR\x06points\"\x8f\x02\n" +
+	"\x06points\x18\x02 \x03(\v2\x1c.swarmgod.v1.MissionWaypointR\x06points\"\xe8\x04\n" +
 	"\vMissionPlan\x12\x17\n" +
 	"\aplan_id\x18\x01 \x01(\tR\x06planId\x12,\n" +
 	"\x04mode\x18\x02 \x01(\x0e2\x18.swarmgod.v1.MissionModeR\x04mode\x12\"\n" +
@@ -855,15 +1319,23 @@ const file_swarmgod_v1_mission_proto_rawDesc = "" +
 	"\x06routes\x18\x04 \x03(\v2\x19.swarmgod.v1.MissionRouteR\x06routes\x12\x1b\n" +
 	"\tleader_id\x18\x05 \x01(\rR\bleaderId\x12(\n" +
 	"\x10arrival_radius_m\x18\x06 \x01(\x01R\x0earrivalRadiusM\x12\x1b\n" +
-	"\trtl_after\x18\a \x01(\bR\brtlAfter\"f\n" +
+	"\trtl_after\x18\a \x01(\bR\brtlAfter\x12g\n" +
+	"\x15participant_altitudes\x18\b \x03(\v22.swarmgod.v1.MissionPlan.ParticipantAltitudesEntryR\x14participantAltitudes\x12E\n" +
+	"\rreturn_policy\x18\t \x01(\x0e2 .swarmgod.v1.MissionReturnPolicyR\freturnPolicy\x12^\n" +
+	"\x16separate_return_timing\x18\n" +
+	" \x01(\x0e2(.swarmgod.v1.MissionSeparateReturnTimingR\x14separateReturnTiming\x1aG\n" +
+	"\x19ParticipantAltitudesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\rR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x01R\x05value:\x028\x01\"f\n" +
 	"\x13StartMissionRequest\x12,\n" +
 	"\x04plan\x18\x01 \x01(\v2\x18.swarmgod.v1.MissionPlanR\x04plan\x12!\n" +
-	"\foperation_id\x18\x02 \x01(\tR\voperationId\"\x8b\x01\n" +
+	"\foperation_id\x18\x02 \x01(\tR\voperationId\"\xb6\x01\n" +
 	"\x14StartMissionResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x15\n" +
 	"\x06run_id\x18\x03 \x01(\x04R\x05runId\x122\n" +
-	"\x05state\x18\x04 \x01(\x0e2\x1c.swarmgod.v1.MissionRunStateR\x05state\"L\n" +
+	"\x05state\x18\x04 \x01(\x0e2\x1c.swarmgod.v1.MissionRunStateR\x05state\x12)\n" +
+	"\x10authority_active\x18\x05 \x01(\bR\x0fauthorityActive\"L\n" +
 	"\x14CancelMissionRequest\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\x04R\x05runId\x12\x1d\n" +
 	"\n" +
@@ -874,7 +1346,12 @@ const file_swarmgod_v1_mission_proto_rawDesc = "" +
 	"\x05index\x18\x02 \x01(\x05R\x05index\x12\x1f\n" +
 	"\vremaining_s\x18\x03 \x01(\x01R\n" +
 	"remainingS\x12\x17\n" +
-	"\atotal_s\x18\x04 \x01(\x05R\x06totalS\"\xcc\x04\n" +
+	"\atotal_s\x18\x04 \x01(\x05R\x06totalS\"\x8e\x01\n" +
+	"\x1bMissionParticipantRejection\x12\x15\n" +
+	"\x06run_id\x18\x01 \x01(\x04R\x05runId\x12%\n" +
+	"\x0ewaypoint_index\x18\x02 \x01(\x05R\rwaypointIndex\x12\x19\n" +
+	"\bdrone_id\x18\x03 \x01(\rR\adroneId\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\"\xae\x0e\n" +
 	"\x14MissionStateResponse\x12\x16\n" +
 	"\x06active\x18\x01 \x01(\bR\x06active\x12\x15\n" +
 	"\x06run_id\x18\x02 \x01(\x04R\x05runId\x12\x17\n" +
@@ -889,7 +1366,31 @@ const file_swarmgod_v1_mission_proto_rawDesc = "" +
 	" \x03(\rR\aarrived\x12.\n" +
 	"\x05waits\x18\v \x03(\v2\x18.swarmgod.v1.MissionWaitR\x05waits\x12'\n" +
 	"\x0flast_transition\x18\f \x01(\tR\x0elastTransition\x12'\n" +
-	"\x0fterminal_reason\x18\r \x01(\tR\x0eterminalReason\x1a;\n" +
+	"\x0fterminal_reason\x18\r \x01(\tR\x0eterminalReason\x12)\n" +
+	"\x10authority_active\x18\x0e \x01(\bR\x0fauthorityActive\x12,\n" +
+	"\x04plan\x18\x0f \x01(\v2\x18.swarmgod.v1.MissionPlanR\x04plan\x12_\n" +
+	"\x16participant_rejections\x18\x10 \x03(\v2(.swarmgod.v1.MissionParticipantRejectionR\x15participantRejections\x12+\n" +
+	"\x11recovery_required\x18\x11 \x01(\bR\x10recoveryRequired\x12T\n" +
+	"\x17recovery_previous_state\x18\x12 \x01(\x0e2\x1c.swarmgod.v1.MissionRunStateR\x15recoveryPreviousState\x12'\n" +
+	"\x0frecovery_reason\x18\x13 \x01(\tR\x0erecoveryReason\x12<\n" +
+	"\x1apersistence_schema_version\x18\x14 \x01(\rR\x18persistenceSchemaVersion\x12-\n" +
+	"\x12persisted_revision\x18\x15 \x01(\x04R\x11persistedRevision\x12'\n" +
+	"\x0fauthority_scope\x18\x16 \x01(\tR\x0eauthorityScope\x12*\n" +
+	"\x11origin_session_id\x18\x17 \x01(\tR\x0foriginSessionId\x12&\n" +
+	"\x0fcore_session_id\x18\x18 \x01(\tR\rcoreSessionId\x125\n" +
+	"\x16persistence_compatible\x18\x19 \x01(\bR\x15persistenceCompatible\x12+\n" +
+	"\x11persistence_fault\x18\x1a \x01(\tR\x10persistenceFault\x12!\n" +
+	"\foperation_id\x18\x1b \x01(\tR\voperationId\x12V\n" +
+	"\x16resolved_return_policy\x18\x1c \x01(\x0e2 .swarmgod.v1.MissionReturnPolicyR\x14resolvedReturnPolicy\x12B\n" +
+	"\freturn_state\x18\x1d \x01(\x0e2\x1f.swarmgod.v1.MissionReturnStateR\vreturnState\x12/\n" +
+	"\x13return_participants\x18\x1e \x03(\rR\x12returnParticipants\x12#\n" +
+	"\rreturn_reason\x18\x1f \x01(\tR\freturnReason\x12*\n" +
+	"\x11current_leader_id\x18  \x01(\rR\x0fcurrentLeaderId\x12/\n" +
+	"\x13active_participants\x18! \x03(\rR\x12activeParticipants\x123\n" +
+	"\x15excluded_participants\x18\" \x03(\rR\x14excludedParticipants\x12+\n" +
+	"\x11succession_reason\x18# \x01(\tR\x10successionReason\x12)\n" +
+	"\x10swarm_generation\x18$ \x01(\x04R\x0fswarmGeneration\x12-\n" +
+	"\x12succession_pending\x18% \x01(\bR\x11successionPending\x1a;\n" +
 	"\rSepIndexEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\rR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x05R\x05value:\x028\x01*a\n" +
@@ -911,7 +1412,25 @@ const file_swarmgod_v1_mission_proto_rawDesc = "" +
 	"\x17MISSION_STATE_CANCELLED\x10\x06\x12\x1d\n" +
 	"\x19MISSION_STATE_INTERRUPTED\x10\a\x12\x18\n" +
 	"\x14MISSION_STATE_FAILED\x10\b\x12\x1b\n" +
-	"\x17MISSION_STATE_COMPLETED\x10\tB8Z6github.com/swarmgod/backend/gen/swarmgod/v1;swarmgodv1b\x06proto3"
+	"\x17MISSION_STATE_COMPLETED\x10\t*\xe4\x01\n" +
+	"\x13MissionReturnPolicy\x12%\n" +
+	"!MISSION_RETURN_POLICY_UNSPECIFIED\x10\x00\x12\x1e\n" +
+	"\x1aMISSION_RETURN_POLICY_NONE\x10\x01\x12/\n" +
+	"+MISSION_RETURN_POLICY_RTL_ALL_AFTER_MISSION\x10\x02\x12&\n" +
+	"\"MISSION_RETURN_POLICY_SWARM_RETURN\x10\x03\x12-\n" +
+	")MISSION_RETURN_POLICY_WAVE_MANAGED_RETURN\x10\x04*\xb6\x01\n" +
+	"\x1bMissionSeparateReturnTiming\x12.\n" +
+	"*MISSION_SEPARATE_RETURN_TIMING_UNSPECIFIED\x10\x00\x123\n" +
+	"/MISSION_SEPARATE_RETURN_ALL_ON_MISSION_COMPLETE\x10\x01\x122\n" +
+	".MISSION_SEPARATE_RETURN_EACH_ON_ROUTE_COMPLETE\x10\x02*\x93\x02\n" +
+	"\x12MissionReturnState\x12!\n" +
+	"\x1dMISSION_RETURN_STATE_INACTIVE\x10\x00\x12 \n" +
+	"\x1cMISSION_RETURN_STATE_PENDING\x10\x01\x12\"\n" +
+	"\x1eMISSION_RETURN_STATE_RETURNING\x10\x02\x12\"\n" +
+	"\x1eMISSION_RETURN_STATE_COMPLETED\x10\x03\x12#\n" +
+	"\x1fMISSION_RETURN_STATE_SUPPRESSED\x10\x04\x12\x1f\n" +
+	"\x1bMISSION_RETURN_STATE_FAILED\x10\x05\x12*\n" +
+	"&MISSION_RETURN_STATE_RECOVERY_REQUIRED\x10\x06B8Z6github.com/swarmgod/backend/gen/swarmgod/v1;swarmgodv1b\x06proto3"
 
 var (
 	file_swarmgod_v1_mission_proto_rawDescOnce sync.Once
@@ -925,39 +1444,52 @@ func file_swarmgod_v1_mission_proto_rawDescGZIP() []byte {
 	return file_swarmgod_v1_mission_proto_rawDescData
 }
 
-var file_swarmgod_v1_mission_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_swarmgod_v1_mission_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_swarmgod_v1_mission_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
+var file_swarmgod_v1_mission_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_swarmgod_v1_mission_proto_goTypes = []any{
-	(MissionMode)(0),               // 0: swarmgod.v1.MissionMode
-	(MissionWpAction)(0),           // 1: swarmgod.v1.MissionWpAction
-	(MissionRunState)(0),           // 2: swarmgod.v1.MissionRunState
-	(*MissionWaypoint)(nil),        // 3: swarmgod.v1.MissionWaypoint
-	(*MissionRoute)(nil),           // 4: swarmgod.v1.MissionRoute
-	(*MissionPlan)(nil),            // 5: swarmgod.v1.MissionPlan
-	(*StartMissionRequest)(nil),    // 6: swarmgod.v1.StartMissionRequest
-	(*StartMissionResponse)(nil),   // 7: swarmgod.v1.StartMissionResponse
-	(*CancelMissionRequest)(nil),   // 8: swarmgod.v1.CancelMissionRequest
-	(*GetMissionStateRequest)(nil), // 9: swarmgod.v1.GetMissionStateRequest
-	(*MissionWait)(nil),            // 10: swarmgod.v1.MissionWait
-	(*MissionStateResponse)(nil),   // 11: swarmgod.v1.MissionStateResponse
-	nil,                            // 12: swarmgod.v1.MissionStateResponse.SepIndexEntry
+	(MissionMode)(0),                    // 0: swarmgod.v1.MissionMode
+	(MissionWpAction)(0),                // 1: swarmgod.v1.MissionWpAction
+	(MissionRunState)(0),                // 2: swarmgod.v1.MissionRunState
+	(MissionReturnPolicy)(0),            // 3: swarmgod.v1.MissionReturnPolicy
+	(MissionSeparateReturnTiming)(0),    // 4: swarmgod.v1.MissionSeparateReturnTiming
+	(MissionReturnState)(0),             // 5: swarmgod.v1.MissionReturnState
+	(*MissionWaypoint)(nil),             // 6: swarmgod.v1.MissionWaypoint
+	(*MissionRoute)(nil),                // 7: swarmgod.v1.MissionRoute
+	(*MissionPlan)(nil),                 // 8: swarmgod.v1.MissionPlan
+	(*StartMissionRequest)(nil),         // 9: swarmgod.v1.StartMissionRequest
+	(*StartMissionResponse)(nil),        // 10: swarmgod.v1.StartMissionResponse
+	(*CancelMissionRequest)(nil),        // 11: swarmgod.v1.CancelMissionRequest
+	(*GetMissionStateRequest)(nil),      // 12: swarmgod.v1.GetMissionStateRequest
+	(*MissionWait)(nil),                 // 13: swarmgod.v1.MissionWait
+	(*MissionParticipantRejection)(nil), // 14: swarmgod.v1.MissionParticipantRejection
+	(*MissionStateResponse)(nil),        // 15: swarmgod.v1.MissionStateResponse
+	nil,                                 // 16: swarmgod.v1.MissionPlan.ParticipantAltitudesEntry
+	nil,                                 // 17: swarmgod.v1.MissionStateResponse.SepIndexEntry
 }
 var file_swarmgod_v1_mission_proto_depIdxs = []int32{
 	1,  // 0: swarmgod.v1.MissionWaypoint.action:type_name -> swarmgod.v1.MissionWpAction
-	3,  // 1: swarmgod.v1.MissionRoute.points:type_name -> swarmgod.v1.MissionWaypoint
+	6,  // 1: swarmgod.v1.MissionRoute.points:type_name -> swarmgod.v1.MissionWaypoint
 	0,  // 2: swarmgod.v1.MissionPlan.mode:type_name -> swarmgod.v1.MissionMode
-	4,  // 3: swarmgod.v1.MissionPlan.routes:type_name -> swarmgod.v1.MissionRoute
-	5,  // 4: swarmgod.v1.StartMissionRequest.plan:type_name -> swarmgod.v1.MissionPlan
-	2,  // 5: swarmgod.v1.StartMissionResponse.state:type_name -> swarmgod.v1.MissionRunState
-	0,  // 6: swarmgod.v1.MissionStateResponse.mode:type_name -> swarmgod.v1.MissionMode
-	2,  // 7: swarmgod.v1.MissionStateResponse.state:type_name -> swarmgod.v1.MissionRunState
-	12, // 8: swarmgod.v1.MissionStateResponse.sep_index:type_name -> swarmgod.v1.MissionStateResponse.SepIndexEntry
-	10, // 9: swarmgod.v1.MissionStateResponse.waits:type_name -> swarmgod.v1.MissionWait
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	7,  // 3: swarmgod.v1.MissionPlan.routes:type_name -> swarmgod.v1.MissionRoute
+	16, // 4: swarmgod.v1.MissionPlan.participant_altitudes:type_name -> swarmgod.v1.MissionPlan.ParticipantAltitudesEntry
+	3,  // 5: swarmgod.v1.MissionPlan.return_policy:type_name -> swarmgod.v1.MissionReturnPolicy
+	4,  // 6: swarmgod.v1.MissionPlan.separate_return_timing:type_name -> swarmgod.v1.MissionSeparateReturnTiming
+	8,  // 7: swarmgod.v1.StartMissionRequest.plan:type_name -> swarmgod.v1.MissionPlan
+	2,  // 8: swarmgod.v1.StartMissionResponse.state:type_name -> swarmgod.v1.MissionRunState
+	0,  // 9: swarmgod.v1.MissionStateResponse.mode:type_name -> swarmgod.v1.MissionMode
+	2,  // 10: swarmgod.v1.MissionStateResponse.state:type_name -> swarmgod.v1.MissionRunState
+	17, // 11: swarmgod.v1.MissionStateResponse.sep_index:type_name -> swarmgod.v1.MissionStateResponse.SepIndexEntry
+	13, // 12: swarmgod.v1.MissionStateResponse.waits:type_name -> swarmgod.v1.MissionWait
+	8,  // 13: swarmgod.v1.MissionStateResponse.plan:type_name -> swarmgod.v1.MissionPlan
+	14, // 14: swarmgod.v1.MissionStateResponse.participant_rejections:type_name -> swarmgod.v1.MissionParticipantRejection
+	2,  // 15: swarmgod.v1.MissionStateResponse.recovery_previous_state:type_name -> swarmgod.v1.MissionRunState
+	3,  // 16: swarmgod.v1.MissionStateResponse.resolved_return_policy:type_name -> swarmgod.v1.MissionReturnPolicy
+	5,  // 17: swarmgod.v1.MissionStateResponse.return_state:type_name -> swarmgod.v1.MissionReturnState
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_swarmgod_v1_mission_proto_init() }
@@ -970,8 +1502,8 @@ func file_swarmgod_v1_mission_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_swarmgod_v1_mission_proto_rawDesc), len(file_swarmgod_v1_mission_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   10,
+			NumEnums:      6,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

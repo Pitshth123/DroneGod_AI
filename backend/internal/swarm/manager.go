@@ -30,6 +30,72 @@ const returnTravelTimeoutSec = 180
 const fallbackLandingTimeoutSec = 90
 const formUpPhaseTimeoutSec = 60
 
+// navigationSendGuard is the swarm-side final-write gate used by cancellable
+// RETURN/LAND navigation. Cancel waits only for a transport write already in
+// progress; it never waits for an FC ACK. Once Cancel returns, no later guarded
+// navigation write from that stale return sequence can begin.
+type navigationSendGuard struct {
+	mu        sync.Mutex
+	cancelled bool
+}
+
+// returnParticipantSendGuard composes Return revocation with fleet's failsafe
+// latch at the actual transport-write boundary. The shared navigation guard
+// prevents stale writes after operator revocation; the fleet boundary prevents
+// any GOTO/LAND/RTL after failsafe ownership is established for this aircraft.
+type returnParticipantSendGuard struct {
+	navigation *navigationSendGuard
+	owner      interface {
+		DoIfFailsafeInactive(uint32, func() error) error
+	}
+	id uint32
+}
+
+func (g *returnParticipantSendGuard) DoSend(send func() error) error {
+	if g == nil || g.navigation == nil || g.owner == nil {
+		return context.Canceled
+	}
+	return g.navigation.DoSend(func() error {
+		return g.owner.DoIfFailsafeInactive(g.id, send)
+	})
+}
+
+// ReturnOutcome distinguishes successful Return completion from cancellation
+// and failure. Lifecycle completion alone is intentionally not a success signal.
+type ReturnOutcome uint8
+
+const (
+	ReturnOutcomeSucceeded ReturnOutcome = iota + 1
+	ReturnOutcomeCancelled
+	ReturnOutcomeFailed
+)
+
+type ReturnResult struct {
+	Outcome ReturnOutcome
+	Reason  string
+}
+
+func (g *navigationSendGuard) DoSend(send func() error) error {
+	if g == nil {
+		return send()
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.cancelled {
+		return context.Canceled
+	}
+	return send()
+}
+
+func (g *navigationSendGuard) Cancel() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	g.cancelled = true
+	g.mu.Unlock()
+}
+
 type Manager struct {
 	cfg    config.Config
 	fleet  *fleet.Manager
@@ -37,24 +103,32 @@ type Manager struct {
 	audit  *audit.Logger
 	events *events.Bus
 
-	mu          sync.RWMutex
-	active      bool
-	halted      bool // leader failsafe → formation หยุดแบบ fail-closed (ไม่ auto-resume)
-	spacing     float64
-	headingMode pb.HeadingMode
-	formation   pb.Formation
-	leaderID    uint32 // ตัวแม่ปัจจุบัน (sticky)
-	pinnedID    uint32 // ตัวแม่ที่ "ผู้ใช้เลือกเอง" — ชนะ auto pick เสมอถ้ายัง online
-	note        string
+	mu              sync.RWMutex
+	active          bool
+	ready           bool     // form-up complete; steady follower-only loop owns navigation
+	missionLeaderID uint32   // non-zero while Mission exclusively owns this fixed leader
+	missionMembers  []uint32 // current in-run members in original mission order
+	missionExcluded map[uint32]bool
+	formationGen    uint64 // invalidates follower targets planned before membership/rebind
+	halted          bool   // leader failsafe → formation หยุดแบบ fail-closed (ไม่ auto-resume)
+	spacing         float64
+	headingMode     pb.HeadingMode
+	formation       pb.Formation
+	leaderID        uint32 // ตัวแม่ปัจจุบัน (sticky)
+	pinnedID        uint32 // ตัวแม่ที่ "ผู้ใช้เลือกเอง" — ชนะ auto pick เสมอถ้ายัง online
+	note            string
 
-	cancel   context.CancelFunc
-	done     chan struct{}
-	stopping bool
-	stopDone chan struct{}
+	cancel         context.CancelFunc
+	done           chan struct{}
+	formationGuard *navigationSendGuard
+	stopping       bool
+	stopDone       chan struct{}
 
 	returnMu     sync.Mutex
 	returnCancel context.CancelFunc
 	returnDone   chan struct{}
+	returnGuard  *navigationSendGuard
+	returnResult chan ReturnResult
 }
 
 func NewManager(cfg config.Config, fl *fleet.Manager, env *safety.Envelope, aud *audit.Logger, bus *events.Bus) *Manager {
@@ -160,12 +234,20 @@ func (m *Manager) Start(parent context.Context) error {
 		return fmt.Errorf("need >= 2 online drones (have %d)", len(online))
 	}
 	m.active = true
-	m.halted = false // เริ่มภารกิจใหม่ = ล้างสถานะ halt เดิม (ต้อง Start ใหม่เท่านั้น)
+	m.ready = false
+	m.missionLeaderID = 0
+	m.missionMembers = nil
+	m.missionExcluded = nil
+	m.formationGen++
+	m.halted = false                  // เริ่มภารกิจใหม่ = ล้างสถานะ halt เดิม (ต้อง Start ใหม่เท่านั้น)
 	m.leaderID = m.pickLeader(online) // เคารพตัวแม่ที่ผู้ใช้ปักหมุดไว้
 	m.note = fmt.Sprintf("formation start — leader Drone %d", m.leaderID)
 	ctx, cancel := context.WithCancel(parent)
+	guard := &navigationSendGuard{}
+	ctx = fleet.WithSendGuard(ctx, guard)
 	m.cancel = cancel
 	m.done = make(chan struct{})
+	m.formationGuard = guard
 	done := m.done
 	m.mu.Unlock()
 
@@ -175,32 +257,48 @@ func (m *Manager) Start(parent context.Context) error {
 	return nil
 }
 
-// Stop หยุด formation (โดรนค้างที่เดิม — ไม่สั่งอะไรเพิ่ม)
-func (m *Manager) Stop() {
+// RevokeFormationNavigation removes formation write authority immediately and
+// returns a completion channel for the old loop. It waits only long enough to
+// acquire m.mu, which is also the final follower-send boundary: once this method
+// returns, no stale follower GOTO can begin. Loop shutdown/audit completes
+// asynchronously so KILL/STOP ALL never wait up to two seconds under API locks.
+func (m *Manager) RevokeFormationNavigation() <-chan struct{} {
 	m.mu.Lock()
 	if m.stopping {
 		wait := m.stopDone
 		m.mu.Unlock()
-		if wait != nil {
-			<-wait
-		}
-		return
+		return wait
 	}
 	m.stopping = true
-	m.stopDone = make(chan struct{})
-	stopDone := m.stopDone
+	stopDone := make(chan struct{})
+	m.stopDone = stopDone
 	cancel := m.cancel
 	done := m.done
+	guard := m.formationGuard
 	m.cancel = nil
 	m.done = nil
+	m.formationGuard = nil
 	m.active = false
+	m.ready = false
+	m.missionLeaderID = 0
+	m.missionMembers = nil
+	m.missionExcluded = nil
+	m.formationGen++
 	m.halted = false
 	m.note = "formation stopped"
 	m.mu.Unlock()
+
+	if guard != nil {
+		guard.Cancel()
+	}
 	if cancel != nil {
 		cancel()
 	}
-	// รอให้ tick ที่กำลังทำงานจบจริง ก่อนคำสั่ง Hold/RTL ถัดไป
+	go m.finishFormationStop(done, stopDone)
+	return stopDone
+}
+
+func (m *Manager) finishFormationStop(done <-chan struct{}, stopDone chan struct{}) {
 	if done != nil {
 		select {
 		case <-done:
@@ -208,34 +306,92 @@ func (m *Manager) Stop() {
 			log.Println("[swarm] stop timeout waiting for loop")
 		}
 	}
-	m.mu.Lock()
-	m.stopping = false
-	m.stopDone = nil
-	close(stopDone)
-	m.mu.Unlock()
-	m.audit.Event("swarm", "formation stopped")
+	// Synchronous Stop() treats stopDone as the full teardown boundary, including
+	// audit/log emission. Emergency callers never wait on this channel.
+	if m.audit != nil {
+		m.audit.Event("swarm", "formation stopped")
+	}
 	log.Println("[swarm] STOP")
+	m.mu.Lock()
+	if m.stopDone == stopDone {
+		m.stopping = false
+		m.stopDone = nil
+		close(stopDone)
+	}
+	m.mu.Unlock()
 }
 
-// CancelReturn ยกเลิก return/land sequence และรอให้ goroutine หยุดส่งคำสั่งจริง
-// E-STOP ต้องเรียกฟังก์ชันนี้ก่อนสั่ง zero velocity/hold.
-func (m *Manager) CancelReturn() {
+// Stop preserves the historical synchronous contract for non-emergency callers.
+// Emergency/takeover code should use RevokeFormationNavigation and proceed once
+// write authority has been revoked, without waiting for loop teardown.
+func (m *Manager) Stop() {
+	if wait := m.RevokeFormationNavigation(); wait != nil {
+		<-wait
+	}
+}
+
+// RevokeReturnNavigation closes the return sequence's final-write guard before
+// cancelling its context. It does not wait for telemetry/ACK cleanup; after this
+// method returns no later guarded RETURN/LAND transport write can begin.
+func (m *Manager) RevokeReturnNavigation() <-chan struct{} {
 	m.returnMu.Lock()
 	cancel := m.returnCancel
 	done := m.returnDone
+	guard := m.returnGuard
 	m.returnMu.Unlock()
-	if cancel == nil {
+	if guard != nil {
+		guard.Cancel()
+	}
+	if cancel != nil {
+		cancel()
+	}
+	return done
+}
+
+// CancelReturn keeps the old synchronous contract for callers that need the
+// return goroutine fully gone. Emergency/takeover code uses RevokeReturnNavigation.
+func (m *Manager) CancelReturn() {
+	done := m.RevokeReturnNavigation()
+	if done == nil {
 		return
 	}
-	cancel()
-	if done != nil {
-		select {
-		case <-done:
-		case <-time.After(2 * time.Second):
-			log.Println("[swarm] return cancel timeout")
-		}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		log.Println("[swarm] return cancel timeout")
 	}
-	m.audit.Event("swarm", "return/land cancelled")
+	if m.audit != nil {
+		m.audit.Event("swarm", "return/land cancelled")
+	}
+}
+
+// ReturnCompletion returns the current Return sequence completion boundary. It
+// is observability/lifecycle only; waiting on it grants no navigation authority.
+// If a just-started sequence already completed, the returned channel is closed.
+func (m *Manager) ReturnCompletion() <-chan struct{} {
+	m.returnMu.Lock()
+	done := m.returnDone
+	m.returnMu.Unlock()
+	if done != nil {
+		return done
+	}
+	closed := make(chan struct{})
+	close(closed)
+	return closed
+}
+
+// ReturnResults reports the semantic result for the current Return generation.
+// Unlike ReturnCompletion, cancellation can never be mistaken for success.
+func (m *Manager) ReturnResults() <-chan ReturnResult {
+	m.returnMu.Lock()
+	result := m.returnResult
+	m.returnMu.Unlock()
+	if result != nil {
+		return result
+	}
+	closed := make(chan ReturnResult)
+	close(closed)
+	return closed
 }
 
 func (m *Manager) loop(ctx context.Context, done chan struct{}) {
@@ -243,10 +399,18 @@ func (m *Manager) loop(ctx context.Context, done chan struct{}) {
 	if !m.formUpSequential(ctx) {
 		m.mu.Lock()
 		m.active = false
+		m.ready = false
 		m.note = "formation setup failed"
 		m.mu.Unlock()
 		return
 	}
+	m.mu.Lock()
+	if !m.active || m.stopping {
+		m.mu.Unlock()
+		return
+	}
+	m.ready = true
+	m.mu.Unlock()
 	ticker := time.NewTicker(400 * time.Millisecond) // เร็วขึ้น — ลูกเกาะแม่ทันขึ้น
 	defer ticker.Stop()
 	for {
@@ -360,16 +524,25 @@ func (m *Manager) formUpSequential(ctx context.Context) bool {
 	}
 
 	// ตรึงตัวแม่ไว้ก่อนเริ่ม transition.
-	if err := leader.Goto(lLat, lLon, lAlt); err != nil {
+	// Planning-time membership/failsafe filtering is not enough: a battery/link
+	// failsafe can latch after planning but before the MAVLink write. Compose the
+	// per-aircraft fleet failsafe boundary with the formation cancellation guard
+	// already on ctx (leader pin uses the leader's ID). Both cover only the short
+	// transport write; the ACK wait stays outside fsMu inside fleet.sendCmd.
+	if err := leader.GotoContext(m.fleet.WithFailsafeSendGuard(ctx, leaderID), lLat, lLon, lAlt); err != nil {
 		m.formUpFailed(leaderID, "ตรึงตัวแม่ไม่สำเร็จ: "+err.Error())
 		return false
 	}
 	m.events.Publish(pb.EventLevel_EVENT_LEVEL_INFO, 0, "swarm",
 		fmt.Sprintf("FORM UP แบบกันชน: %d ลำ, ย้ายทีละลำผ่านชั้นสูง", len(online)))
 
+	// Each follower transit/staging/final write composes the follower's own fleet
+	// failsafe boundary on top of the formation cancellation guard (same reasoning
+	// as the leader pin above). waitFormUpTarget keeps using the plain ctx: it only
+	// observes telemetry and must not enter fsMu.
 	for _, t := range targets {
 		d := m.fleet.Drone(t.id)
-		if d == nil || d.GotoYaw(t.startLat, t.startLon, t.transitAlt, t.yaw) != nil ||
+		if d == nil || d.GotoYawContext(m.fleet.WithFailsafeSendGuard(ctx, t.id), t.startLat, t.startLon, t.transitAlt, t.yaw) != nil ||
 			!m.waitFormUpTarget(ctx, t.id, t.startLat, t.startLon, t.transitAlt) {
 			m.formUpFailed(t.id, "ขึ้นชั้นผ่านทางไม่สำเร็จ/หมดเวลา")
 			return false
@@ -377,7 +550,7 @@ func (m *Manager) formUpSequential(ctx context.Context) bool {
 	}
 	for _, t := range targets {
 		d := m.fleet.Drone(t.id)
-		if d == nil || d.GotoYaw(t.targetLat, t.targetLon, t.transitAlt, t.yaw) != nil ||
+		if d == nil || d.GotoYawContext(m.fleet.WithFailsafeSendGuard(ctx, t.id), t.targetLat, t.targetLon, t.transitAlt, t.yaw) != nil ||
 			!m.waitFormUpTarget(ctx, t.id, t.targetLat, t.targetLon, t.transitAlt) {
 			m.formUpFailed(t.id, "ย้ายแนวราบไม่สำเร็จ/หมดเวลา")
 			return false
@@ -385,7 +558,7 @@ func (m *Manager) formUpSequential(ctx context.Context) bool {
 	}
 	for _, t := range targets {
 		d := m.fleet.Drone(t.id)
-		if d == nil || d.GotoYaw(t.targetLat, t.targetLon, t.finalAlt, t.yaw) != nil ||
+		if d == nil || d.GotoYawContext(m.fleet.WithFailsafeSendGuard(ctx, t.id), t.targetLat, t.targetLon, t.finalAlt, t.yaw) != nil ||
 			!m.waitFormUpTarget(ctx, t.id, t.targetLat, t.targetLon, t.finalAlt) {
 			m.formUpFailed(t.id, "ลง slot ไม่สำเร็จ/หมดเวลา")
 			return false
@@ -454,6 +627,24 @@ type followerCmd struct {
 	yaw           float64
 }
 
+// sendFollowerIfOwned is the final formation-authority boundary. Generation and
+// per-run membership prevent a target planned before exclusion/leader rebind
+// from beginning a later transport write. Holding RLock covers only that write,
+// never an FC ACK.
+func (m *Manager) sendFollowerIfOwned(generation uint64, leaderID, followerID uint32,
+	send func() error) (bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.active || !m.ready || m.stopping || m.halted || m.leaderID != leaderID ||
+		m.formationGen != generation || followerID == leaderID {
+		return false, nil
+	}
+	if m.missionLeaderID != 0 && !contains(m.missionMembers, followerID) {
+		return false, nil
+	}
+	return true, send()
+}
+
 // planFormationTargets คำนวณเป้าหมายของ follower แต่ละลำจากตำแหน่งตัวแม่
 //
 // ลำที่ failsafe(id)==true (Core กำลัง failsafe RTL) จะถูกข้าม — ไม่ส่ง target ทับ
@@ -503,6 +694,15 @@ func (m *Manager) tick() {
 	}
 
 	m.mu.Lock()
+	// While Mission owns the fixed leader, leader reassignment is forbidden.
+	// Losing that leader halts formation fail-closed; otherwise the old leader
+	// could become a follower and receive swarm navigation over Mission authority.
+	if m.missionLeaderID != 0 && !onlineSet[m.leaderID] {
+		leaderID := m.leaderID
+		m.mu.Unlock()
+		m.haltFormation(fmt.Sprintf("mission leader Drone %d lost — formation halted", leaderID))
+		return
+	}
 	// ── FAILOVER: ตัวแม่ยัง online ไหม? ถ้าไม่ → เลื่อนตัวถัดไป (sticky) ──
 	if !onlineSet[m.leaderID] {
 		old := m.leaderID
@@ -519,6 +719,16 @@ func (m *Manager) tick() {
 	spacing := m.spacing
 	headMode := m.headingMode
 	formation := m.formation
+	generation := m.formationGen
+	managed := append([]uint32(nil), online...)
+	if m.missionLeaderID != 0 {
+		managed = managed[:0]
+		for _, id := range m.missionMembers {
+			if onlineSet[id] {
+				managed = append(managed, id)
+			}
+		}
+	}
 	m.mu.Unlock()
 
 	// ตัวแม่ถูก failsafe (battery/link) → Core กำลัง RTL ตัวแม่อยู่
@@ -540,7 +750,7 @@ func (m *Manager) tick() {
 
 	// followers = online ทั้งหมด ยกเว้นตัวแม่ (เรียงลำดับ → slot คงที่)
 	// ลำที่ Core กำลัง failsafe RTL จะถูกตัดออกจาก planFormationTargets ตั้งแต่ต้น
-	for _, c := range planFormationTargets(online, leaderID, lLat, lLon, lAlt, lHdg,
+	for _, c := range planFormationTargets(managed, leaderID, lLat, lLon, lAlt, lHdg,
 		spacing, formation, headMode, m.fleet.FailsafeActive) {
 		fdrone := m.fleet.Drone(c.id)
 		if fdrone == nil {
@@ -550,8 +760,18 @@ func (m *Manager) tick() {
 			log.Printf("[swarm] Drone %d target unsafe: %s", c.id, dec.Reason)
 			continue
 		}
-		// ลูกหันหน้าตามแม่เสมอ (yaw = heading ของตัวแม่)
-		if err := fdrone.GotoYaw(c.lat, c.lon, c.alt, c.yaw); err != nil {
+		allowed, err := m.sendFollowerIfOwned(generation, leaderID, c.id, func() error {
+			// Planning-time failsafe filtering is not enough: the latch can win
+			// after the target is planned but before the final MAVLink write. Keep
+			// formation ownership under m.RLock and add the fleet atomic boundary
+			// at GotoYawContext's actual transport send.
+			ctx := m.fleet.WithFailsafeSendGuard(context.Background(), c.id)
+			return fdrone.GotoYawContext(ctx, c.lat, c.lon, c.alt, c.yaw)
+		})
+		if !allowed {
+			return
+		}
+		if err != nil {
 			log.Printf("[swarm] Drone %d goto err: %v", c.id, err)
 		}
 	}
@@ -580,6 +800,11 @@ func (m *Manager) ReturnAndLand(parent context.Context, requested []uint32, requ
 	}
 	if len(online) == 0 {
 		return fmt.Errorf("ไม่มีโดรน online")
+	}
+	for _, id := range online {
+		if m.fleet.FailsafeActive(id) {
+			return fmt.Errorf("Drone %d failsafe-owned — เริ่ม RETURN ไม่ได้", id)
+		}
 	}
 	// ลำดับ: ตัวแม่ก่อน แล้วที่เหลือ
 	m.mu.RLock()
@@ -632,13 +857,21 @@ func (m *Manager) ReturnAndLand(parent context.Context, requested []uint32, requ
 		return fmt.Errorf("return/land sequence already active")
 	}
 	ctx, cancel := context.WithCancel(parent)
+	guard := &navigationSendGuard{}
+	ctx = fleet.WithSendGuard(ctx, guard)
 	done := make(chan struct{})
+	result := make(chan ReturnResult, 1)
 	m.returnCancel = cancel
 	m.returnDone = done
+	m.returnGuard = guard
+	m.returnResult = result
 	m.returnMu.Unlock()
-	// ลงทะเบียน cancellation ก่อนหยุด formation เพื่อให้ E-STOP ที่เข้าพร้อมกัน
-	// มองเห็น operation นี้และยกเลิกได้ ไม่มีช่องว่างให้ sequence หลุดไปรันทีหลัง.
-	m.Stop() // หยุด follow loop — เข้าโหมดกลับฐาน
+	// ลงทะเบียน cancellation/final-write guard ก่อนถอน formation authority เพื่อให้
+	// E-STOP ที่เข้าพร้อมกันมองเห็น RETURN นี้และยกเลิกได้ ไม่มีช่องว่างให้ sequence
+	// หลุดไปรันทีหลัง. Revoke is deliberately non-blocking with respect to loop
+	// teardown: stale form-up/follower writes are already closed by the formation
+	// guard before RETURN navigation is allowed to proceed.
+	m.RevokeFormationNavigation()
 
 	go func() {
 		defer func() {
@@ -646,41 +879,46 @@ func (m *Manager) ReturnAndLand(parent context.Context, requested []uint32, requ
 			if m.returnDone == done {
 				m.returnCancel = nil
 				m.returnDone = nil
+				m.returnGuard = nil
 			}
 			m.returnMu.Unlock()
 			close(done)
+			close(result)
 		}()
-		m.returnSeq(ctx, order, targetAlt, targetPos, gap)
+		result <- m.returnSeq(ctx, guard, order, targetAlt, targetPos, gap)
 	}()
 	return nil
 }
 
-func (m *Manager) returnSeq(ctx context.Context, order []uint32, targetAlt map[uint32]float64,
-	targetPos map[uint32][2]float64, gap float64) {
+func (m *Manager) returnSeq(ctx context.Context, guard *navigationSendGuard, order []uint32,
+	targetAlt map[uint32]float64, targetPos map[uint32][2]float64, gap float64) ReturnResult {
 	m.events.Publish(pb.EventLevel_EVENT_LEVEL_INFO, 0, "return",
 		fmt.Sprintf("กลับจุดปล่อยรายลำ — แยกชั้นและจุดลงห่างกันอย่างน้อย %.1fm", gap))
 
 	// Phase 1: ไต่/ลดที่ตำแหน่งปัจจุบันก่อน ห้ามเคลื่อนแนวราบเข้าหากัน
 	// จน telemetry ยืนยันว่าทุกลำอยู่คนละชั้นแล้ว.
-	if !m.stageReturnAltitudes(ctx, order, targetAlt) {
+	if !m.stageReturnAltitudes(ctx, guard, order, targetAlt) {
 		if ctx.Err() == nil {
 			m.events.Publish(pb.EventLevel_EVENT_LEVEL_ALARM, 0, "return",
 				"แยกชั้นไม่ครบ — เปลี่ยนเป็น FC RTL ทีละลำ")
-			m.fallbackRTL(ctx, order)
+			if err := m.fallbackRTL(ctx, guard, order); err != nil {
+				return ReturnResult{Outcome: ReturnOutcomeFailed, Reason: err.Error()}
+			}
+			return ReturnResult{Outcome: ReturnOutcomeSucceeded, Reason: "fallback RTL completed"}
 		}
-		return
+		return ReturnResult{Outcome: ReturnOutcomeCancelled, Reason: ctx.Err().Error()}
 	}
 
 	// Phase 2: เมื่อชั้นแยกแล้วจึงบินแนวราบไปเหนือ launch point ของแต่ละลำ.
 	sentAll := true
 	for _, id := range order {
 		if ctx.Err() != nil {
-			return
+			return ReturnResult{Outcome: ReturnOutcomeCancelled, Reason: ctx.Err().Error()}
 		}
 		if d := m.fleet.Drone(id); d != nil {
 			alt := targetAlt[id]
 			pos := targetPos[id]
-			if err := d.Goto(pos[0], pos[1], alt); err != nil {
+			if err := d.GotoContext(m.returnParticipantContext(ctx, guard, id), pos[0], pos[1], alt); err != nil {
 				sentAll = false
 				m.audit.Command(id, "SwarmReturn", true, "goto home send error: "+err.Error(), -1)
 				m.events.Publish(pb.EventLevel_EVENT_LEVEL_WARN, id, "return",
@@ -694,41 +932,50 @@ func (m *Manager) returnSeq(ctx context.Context, order []uint32, targetAlt map[u
 		}
 	}
 	if ctx.Err() != nil {
-		return
+		return ReturnResult{Outcome: ReturnOutcomeCancelled, Reason: ctx.Err().Error()}
 	}
 	if !sentAll || !m.waitNear(ctx, order, targetAlt, targetPos, returnTravelTimeoutSec) {
 		if ctx.Err() != nil {
-			return
+			return ReturnResult{Outcome: ReturnOutcomeCancelled, Reason: ctx.Err().Error()}
 		}
 		m.events.Publish(pb.EventLevel_EVENT_LEVEL_WARN, 0, "return",
 			"กลับถึงจุดปล่อยไม่ครบ — ยกเลิก LAND และใช้ FC RTL ทีละลำ")
-		m.fallbackRTL(ctx, order)
-		return
+		if err := m.fallbackRTL(ctx, guard, order); err != nil {
+			return ReturnResult{Outcome: ReturnOutcomeFailed, Reason: err.Error()}
+		}
+		return ReturnResult{Outcome: ReturnOutcomeSucceeded, Reason: "fallback RTL completed"}
 	}
 
 	// Phase 3: ลงจอดทีละลำ (แม่ก่อน)
 	for i, id := range order {
 		if ctx.Err() != nil {
-			return
+			return ReturnResult{Outcome: ReturnOutcomeCancelled, Reason: ctx.Err().Error()}
 		}
 		d := m.fleet.Drone(id)
 		if d == nil {
 			m.events.Publish(pb.EventLevel_EVENT_LEVEL_ALARM, id, "return",
 				fmt.Sprintf("Drone %d หายระหว่างลำดับลงจอด — ยกเลิกลำที่เหลือ", id))
-			m.fallbackRTL(ctx, order[i:])
-			return
+			if err := m.fallbackRTL(ctx, guard, order[i:]); err != nil {
+				return ReturnResult{Outcome: ReturnOutcomeFailed, Reason: err.Error()}
+			}
+			return ReturnResult{Outcome: ReturnOutcomeSucceeded, Reason: "fallback RTL completed"}
 		}
 		m.events.Publish(pb.EventLevel_EVENT_LEVEL_INFO, id, "return",
 			fmt.Sprintf("Drone %d กำลังลงจอด...", id))
-		cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		cctx, cancel := context.WithTimeout(m.returnParticipantContext(ctx, guard, id), 8*time.Second)
 		code, err := d.LandNow(cctx)
 		cancel()
 		if err != nil || code != 0 {
 			m.audit.Command(id, "SwarmLand", true, fmt.Sprintf("land failed code=%d err=%v", code, err), code)
 			m.events.Publish(pb.EventLevel_EVENT_LEVEL_ALARM, id, "return",
 				fmt.Sprintf("Drone %d LAND ไม่สำเร็จ — หยุดลำดับและใช้ FC RTL", id))
-			m.fallbackRTL(ctx, order[i:])
-			return
+			if ctx.Err() != nil {
+				return ReturnResult{Outcome: ReturnOutcomeCancelled, Reason: ctx.Err().Error()}
+			}
+			if err := m.fallbackRTL(ctx, guard, order[i:]); err != nil {
+				return ReturnResult{Outcome: ReturnOutcomeFailed, Reason: err.Error()}
+			}
+			return ReturnResult{Outcome: ReturnOutcomeSucceeded, Reason: "fallback RTL completed"}
 		}
 		m.audit.Command(id, "SwarmLand", true, "accepted", code)
 		if m.waitLanded(ctx, id, 45) {
@@ -736,49 +983,60 @@ func (m *Manager) returnSeq(ctx context.Context, order []uint32, targetAlt map[u
 				fmt.Sprintf("Drone %d ลงจอดแล้ว", id))
 		} else {
 			if ctx.Err() != nil {
-				return
+				return ReturnResult{Outcome: ReturnOutcomeCancelled, Reason: ctx.Err().Error()}
 			}
 			m.events.Publish(pb.EventLevel_EVENT_LEVEL_ALARM, id, "return",
 				fmt.Sprintf("Drone %d ยังไม่ยืนยันว่าลงจอด — ไม่สั่งลำถัดไป", id))
-			m.fallbackRTL(ctx, order[i:])
-			return
+			if err := m.fallbackRTL(ctx, guard, order[i:]); err != nil {
+				return ReturnResult{Outcome: ReturnOutcomeFailed, Reason: err.Error()}
+			}
+			return ReturnResult{Outcome: ReturnOutcomeSucceeded, Reason: "fallback RTL completed"}
 		}
 	}
 	m.events.Publish(pb.EventLevel_EVENT_LEVEL_OK, 0, "return", "ทุกลำลงจอดเรียบร้อย")
+	return ReturnResult{Outcome: ReturnOutcomeSucceeded, Reason: "all participants landed"}
 }
 
-func (m *Manager) fallbackRTL(ctx context.Context, ids []uint32) {
+func (m *Manager) returnParticipantContext(ctx context.Context, guard *navigationSendGuard, id uint32) context.Context {
+	return fleet.WithSendGuard(ctx, &returnParticipantSendGuard{navigation: guard, owner: m.fleet, id: id})
+}
+
+func (m *Manager) fallbackRTL(ctx context.Context, guard *navigationSendGuard, ids []uint32) error {
 	// ห้ามยิง RTL ทุกลำติดกัน: FC แต่ละตัวอาจมี home เดียว/ใกล้กันและเส้นทาง
 	// จะบรรจบพร้อมกัน. ส่งทีละลำและรอยืนยัน ground+disarmed ก่อนลำถัดไป.
 	for _, id := range ids {
 		if ctx.Err() != nil {
-			return
+			return ctx.Err()
 		}
 		d := m.fleet.Drone(id)
 		if d == nil {
 			continue
 		}
-		cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		cctx, cancel := context.WithTimeout(m.returnParticipantContext(ctx, guard, id), 8*time.Second)
 		code, err := d.ReturnHome(cctx)
 		cancel()
 		m.audit.Command(id, "FallbackRTL", true, fmt.Sprintf("code=%d err=%v", code, err), code)
 		if err != nil || code != 0 {
 			m.events.Publish(pb.EventLevel_EVENT_LEVEL_ALARM, id, "return",
 				fmt.Sprintf("Drone %d FC RTL ไม่สำเร็จ — ไม่สั่งลำถัดไป", id))
-			return
+			return fmt.Errorf("Drone %d fallback RTL failed: code=%d err=%v", id, code, err)
 		}
 		if !m.waitLanded(ctx, id, fallbackLandingTimeoutSec) {
 			if ctx.Err() == nil {
 				m.events.Publish(pb.EventLevel_EVENT_LEVEL_ALARM, id, "return",
 					fmt.Sprintf("Drone %d ยังไม่ยืนยันลงจอด — ไม่สั่งลำถัดไป", id))
 			}
-			return
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("Drone %d fallback RTL landing was not confirmed", id)
 		}
 	}
+	return nil
 }
 
-func (m *Manager) stageReturnAltitudes(ctx context.Context, ids []uint32,
-	targetAlt map[uint32]float64) bool {
+func (m *Manager) stageReturnAltitudes(ctx context.Context, guard *navigationSendGuard,
+	ids []uint32, targetAlt map[uint32]float64) bool {
 	for _, id := range ids {
 		d := m.fleet.Drone(id)
 		if d == nil {
@@ -788,7 +1046,7 @@ func (m *Manager) stageReturnAltitudes(ctx context.Context, ids []uint32,
 		if lat == 0 && lon == 0 {
 			return false
 		}
-		if err := d.Goto(lat, lon, targetAlt[id]); err != nil {
+		if err := d.GotoContext(m.returnParticipantContext(ctx, guard, id), lat, lon, targetAlt[id]); err != nil {
 			m.audit.Command(id, "SwarmReturnStage", true, "stage altitude send error: "+err.Error(), -1)
 			return false
 		}
@@ -961,6 +1219,138 @@ func contains(s []uint32, v uint32) bool {
 	return false
 }
 
+// FollowerAuthorityReady reports whether form-up has finished and the steady
+// formation loop is ready to own followers without ever commanding leaderID.
+func (m *Manager) FollowerAuthorityReady(leaderID uint32) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return leaderID != 0 && m.active && m.ready && !m.stopping && !m.halted &&
+		m.leaderID == leaderID && (m.missionLeaderID == 0 || m.missionLeaderID == leaderID)
+}
+
+// FollowerAuthorityReadyFor additionally verifies the intended run membership.
+// Formation may have been started with more online drones; binding narrows it to
+// this immutable mission participant order before Mission claims the leader.
+func (m *Manager) FollowerAuthorityReadyFor(leaderID uint32, participants []uint32) bool {
+	if len(orderedUnique(participants)) < 2 || !contains(participants, leaderID) {
+		return false
+	}
+	m.mu.RLock()
+	ready := leaderID != 0 && m.active && m.ready && !m.stopping && !m.halted &&
+		m.leaderID == leaderID && (m.missionLeaderID == 0 || m.missionLeaderID == leaderID)
+	m.mu.RUnlock()
+	if !ready || m.fleet == nil {
+		return ready
+	}
+	online := m.fleet.OnlineIDs(m.cfg.LinkLostSec)
+	for _, id := range orderedUnique(participants) {
+		if !contains(online, id) || m.fleet.FailsafeActive(id) {
+			return false
+		}
+	}
+	return true
+}
+
+// ClaimMissionLeader atomically binds the fixed leader against swarm failover.
+// The claim is allowed only after form-up, whose setup phase may command leader.
+func (m *Manager) ClaimMissionLeader(leaderID uint32) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if leaderID == 0 || !m.active || !m.ready || m.stopping || m.halted ||
+		m.leaderID != leaderID || (m.missionLeaderID != 0 && m.missionLeaderID != leaderID) {
+		return false
+	}
+	m.missionLeaderID = leaderID
+	m.formationGen++
+	return true
+}
+
+// ClaimMissionMembership binds Mission to leaderID and freezes the formation's
+// per-run member set.
+func (m *Manager) ClaimMissionMembership(leaderID uint32, participants []uint32) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if leaderID == 0 || !m.active || !m.ready || m.stopping || m.halted ||
+		m.leaderID != leaderID || (m.missionLeaderID != 0 && m.missionLeaderID != leaderID) {
+		return false
+	}
+	members := orderedUnique(participants)
+	if len(members) < 2 || !contains(members, leaderID) {
+		return false
+	}
+	m.missionLeaderID = leaderID
+	m.missionMembers = members
+	m.missionExcluded = make(map[uint32]bool)
+	m.formationGen++
+	return true
+}
+
+// RebindMissionMembership is the short follower final-write boundary used by
+// S09-C succession. It waits only for a transport write already inside
+// sendFollowerIfOwned, never for an ACK or loop teardown.
+func (m *Manager) RebindMissionMembership(oldLeaderID, newLeaderID uint32,
+	activeParticipants, excludedParticipants []uint32) bool {
+	m.mu.Lock()
+	active := orderedUnique(activeParticipants)
+	if oldLeaderID == 0 || newLeaderID == 0 || len(active) < 2 ||
+		!contains(active, newLeaderID) || !m.active || !m.ready || m.stopping || m.halted ||
+		m.leaderID != oldLeaderID || m.missionLeaderID != oldLeaderID {
+		m.mu.Unlock()
+		return false
+	}
+	excluded := make(map[uint32]bool, len(excludedParticipants))
+	for _, id := range excludedParticipants {
+		if contains(active, id) {
+			m.mu.Unlock()
+			return false
+		}
+		excluded[id] = true
+	}
+	m.leaderID = newLeaderID
+	m.missionLeaderID = newLeaderID
+	m.missionMembers = active
+	m.missionExcluded = excluded
+	m.formationGen++
+	m.note = fmt.Sprintf("mission membership rebound — leader Drone %d, active=%v, excluded=%v",
+		newLeaderID, active, excludedParticipants)
+	note := m.note
+	m.mu.Unlock()
+	if m.audit != nil {
+		m.audit.Event("swarm", note)
+	}
+	return true
+}
+
+// ReleaseMissionLeader ends the split-ownership binding without stopping follower
+// formation.  A mismatched stale release cannot clear a newer binding.
+func (m *Manager) ReleaseMissionLeader(leaderID uint32) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.missionLeaderID == leaderID {
+		m.missionLeaderID = 0
+		m.missionMembers = nil
+		m.missionExcluded = nil
+		m.formationGen++
+	}
+}
+
+// NavigationBusy reports whether any swarm-owned navigation loop can still emit
+// flight commands. It covers the formation loop, its stopping handoff, and the
+// asynchronous RETURN/LAND sequence. Locks are sampled separately to preserve
+// the existing returnMu -> Stop()/mu ordering and avoid lock inversion.
+func (m *Manager) NavigationBusy() bool {
+	m.mu.RLock()
+	formationBusy := m.active || m.stopping
+	m.mu.RUnlock()
+	if formationBusy {
+		return true
+	}
+	m.returnMu.Lock()
+	returnBusy := m.returnCancel != nil
+	m.returnMu.Unlock()
+	return returnBusy
+}
+
 // State คืนสถานะปัจจุบัน (ให้ UI)
 func (m *Manager) State() *pb.SwarmState {
 	m.mu.RLock()
@@ -974,7 +1364,13 @@ func (m *Manager) State() *pb.SwarmState {
 		Note:        m.note,
 	}
 	if m.active {
-		for _, fid := range m.fleet.OnlineIDs(m.cfg.LinkLostSec) {
+		var members []uint32
+		if m.missionLeaderID != 0 {
+			members = append([]uint32(nil), m.missionMembers...)
+		} else if m.fleet != nil {
+			members = m.fleet.OnlineIDs(m.cfg.LinkLostSec)
+		}
+		for _, fid := range members {
 			if fid != m.leaderID {
 				st.Edges = append(st.Edges, &pb.SwarmState_Edge{
 					LeaderId: m.leaderID, FollowerId: fid})
@@ -982,4 +1378,17 @@ func (m *Manager) State() *pb.SwarmState {
 		}
 	}
 	return st
+}
+
+func orderedUnique(ids []uint32) []uint32 {
+	seen := make(map[uint32]bool, len(ids))
+	out := make([]uint32, 0, len(ids))
+	for _, id := range ids {
+		if id == 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
 }

@@ -44,6 +44,31 @@ func TestStartRejectedWhileStopIsInProgress(t *testing.T) {
 	}
 }
 
+func TestNavigationBusyCoversFormationStoppingAndReturn(t *testing.T) {
+	m := &Manager{}
+	if m.NavigationBusy() {
+		t.Fatal("idle manager must not report navigation busy")
+	}
+	m.active = true
+	if !m.NavigationBusy() {
+		t.Fatal("active formation must report navigation busy")
+	}
+	m.active = false
+	m.stopping = true
+	if !m.NavigationBusy() {
+		t.Fatal("stopping formation must remain navigation busy until loop exit")
+	}
+	m.stopping = false
+	m.returnCancel = func() {}
+	if !m.NavigationBusy() {
+		t.Fatal("registered RETURN/LAND sequence must report navigation busy")
+	}
+	m.returnCancel = nil
+	if m.NavigationBusy() {
+		t.Fatal("cleared formation/return state must become idle")
+	}
+}
+
 func TestCancelReturnWaitsForSequenceToExit(t *testing.T) {
 	aud, err := audit.New(t.TempDir())
 	if err != nil {

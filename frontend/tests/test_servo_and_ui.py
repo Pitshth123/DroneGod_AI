@@ -261,6 +261,14 @@ class ServoButtonTests(_WinBase):
         self.win._prewarm_ui_paths()
         _pump(0.2)
 
+    def test_prewarm_does_not_spawn_grpc_connectivity_future(self):
+        """Channel-ready polling outlives timed result() and races channel close."""
+        confirm_mod._prewarmed = False
+        with mock.patch("grpc.channel_ready_future") as ready_future:
+            self.win._prewarm_ui_paths()
+            _pump(0.1)
+        ready_future.assert_not_called()
+
     # ── RC input ดิบสูงโดยไม่มีรีโมท ต้องไม่ทำให้ปุ่มถูกล็อก ──
     # ArduPilot สตรีม RC_CHANNELS เสมอแม้ไม่มีรีโมทต่ออยู่ (SITL จริง: RC8=1800)
     # เดิม UI อ่านค่าดิบนั้นเป็น "รีโมทถือห้อง" แล้วบล็อกปุ่ม B ทิ้งทั้งหมด

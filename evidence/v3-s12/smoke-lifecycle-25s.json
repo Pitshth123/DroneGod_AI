@@ -1,0 +1,478 @@
+{
+  "acceptance": {
+    "completed_requested_duration": true,
+    "evidence_parseable": true,
+    "hard_failures": [],
+    "investigate": [
+      "monotonic Python RSS growth across >=5 samples"
+    ],
+    "telemetry_required": true
+  },
+  "actual_duration_seconds": 25.360000000044238,
+  "aggregates": {
+    "core_os_threads": {
+      "delta": 0.0,
+      "end": 11.0,
+      "max": 11.0,
+      "mean": 11.0,
+      "min": 11.0,
+      "samples": 7,
+      "start": 11.0
+    },
+    "core_rss_bytes": {
+      "delta": 225280.0,
+      "end": 74489856.0,
+      "max": 74829824.0,
+      "mean": 74580553.14285715,
+      "min": 74264576.0,
+      "samples": 7,
+      "start": 74264576.0
+    },
+    "python_os_threads": {
+      "delta": 0.0,
+      "end": 16.0,
+      "max": 16.0,
+      "mean": 16.0,
+      "min": 16.0,
+      "samples": 7,
+      "start": 16.0
+    },
+    "python_private_bytes": {
+      "delta": 1318912.0,
+      "end": 29794304.0,
+      "max": 29794304.0,
+      "mean": 29584237.714285713,
+      "min": 28475392.0,
+      "samples": 7,
+      "start": 28475392.0
+    },
+    "python_rss_bytes": {
+      "delta": 516096.0,
+      "end": 41906176.0,
+      "max": 41906176.0,
+      "mean": 41792073.14285714,
+      "min": 41390080.0,
+      "samples": 7,
+      "start": 41390080.0
+    },
+    "render_skip_percent": 39.92094861660079,
+    "render_skipped": 101,
+    "render_total": 152,
+    "rpc_latency_ms": {
+      "delta": -10.27789997169748,
+      "end": 0.6091000395826995,
+      "max": 11.908299988135695,
+      "mean": 7.242022801125259,
+      "min": 0.5760000203736126,
+      "samples": 57,
+      "start": 10.887000011280179
+    }
+  },
+  "authority_token_observed_locally": "core-single-wait",
+  "availability": {
+    "core_os_threads": true,
+    "core_rss": true,
+    "go_goroutines": "NOT CURRENTLY EXPOSED",
+    "native_grpc_threads_separate_from_process_threads": "NOT CURRENTLY EXPOSED",
+    "python_os_threads_including_native_grpc": true,
+    "python_private_bytes": true,
+    "python_rss": true,
+    "real_gui_frame_timing": "NOT CURRENTLY EXPOSED; presentation gate exercised"
+  },
+  "cleanup": {
+    "external_core_and_sitl_left_running": true,
+    "owned_client_closed": true,
+    "owned_stream_closed": true
+  },
+  "counters": {
+    "client_lifecycle_cycles": 50,
+    "mission_start_cancel_cycles": 0,
+    "mission_transitions": 0,
+    "reconnects": 0,
+    "rpc_calls": 57,
+    "rpc_errors": 0,
+    "stream_errors": 0,
+    "telemetry_per_drone": {
+      "1": 253
+    },
+    "telemetry_total": 253,
+    "ui_stalls": 0
+  },
+  "end_reason": "requested workload duration completed",
+  "errors": {
+    "rpc": [],
+    "stream": []
+  },
+  "file_growth": {
+    "database_delta_bytes": 0,
+    "database_end_bytes": 4096,
+    "database_path": "backend\\logs\\s12-smoke.db",
+    "database_start_bytes": 4096,
+    "log_delta_bytes": 24843,
+    "log_end_bytes": 7866875,
+    "log_path": "backend\\logs",
+    "log_start_bytes": 7842032
+  },
+  "generated_at": "2026-08-29T15:35:28.916743Z",
+  "participant_count": 1,
+  "processes": {
+    "core_or_sitl_processes_owned": false,
+    "core_pid": 11456,
+    "core_restart_or_crash_count": 0,
+    "owned_child_processes": [],
+    "recorder_pid": 33204
+  },
+  "profile": "sitl",
+  "requested_duration": "25s",
+  "requested_duration_seconds": 25.0,
+  "result": "PASS",
+  "sample_interval_seconds": 5.0,
+  "samples": [
+    {
+      "at_seconds": 0.0,
+      "client_lifecycle_cycles": 0,
+      "core_process": {
+        "handles": 184,
+        "os_threads": 11,
+        "private_bytes": 57171968,
+        "rss_bytes": 74264576
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "initial",
+      "presentation": {
+        "render_rate_hz": 2.7777777774364365,
+        "render_skipped": 0,
+        "render_total": 0,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 0.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 205,
+        "os_threads": 16,
+        "private_bytes": 28475392,
+        "rss_bytes": 41390080
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 2,
+        "errors": 0,
+        "last_latency_ms": 1.7462000250816345
+      },
+      "telemetry": {
+        "ingest_rate_hz": 0.0,
+        "per_drone": {},
+        "receive_age_ms": {},
+        "source_age_ms": {},
+        "total": 0
+      },
+      "timestamp": "2026-08-29T15:35:03.564562Z"
+    },
+    {
+      "at_seconds": 5.110000000044238,
+      "client_lifecycle_cycles": 10,
+      "core_process": {
+        "handles": 184,
+        "os_threads": 11,
+        "private_bytes": 57675776,
+        "rss_bytes": 74760192
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.067723624979405,
+        "render_skipped": 20,
+        "render_total": 31,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 207,
+        "os_threads": 16,
+        "private_bytes": 29704192,
+        "rss_bytes": 41762816
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 13,
+        "errors": 0,
+        "last_latency_ms": 0.6058000144548714
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.980430528289332,
+        "per_drone": {
+          "1": 51
+        },
+        "receive_age_ms": {
+          "1": 47.0000000204891
+        },
+        "source_age_ms": {
+          "1": 0.47216796875
+        },
+        "total": 51
+      },
+      "timestamp": "2026-08-29T15:35:08.670432Z"
+    },
+    {
+      "at_seconds": 10.094000000040978,
+      "client_lifecycle_cycles": 20,
+      "core_process": {
+        "handles": 184,
+        "os_threads": 11,
+        "private_bytes": 57495552,
+        "rss_bytes": 74588160
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.0,
+        "render_skipped": 40,
+        "render_total": 61,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 983.9999999967404,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 207,
+        "os_threads": 16,
+        "private_bytes": 29745152,
+        "rss_bytes": 41820160
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 24,
+        "errors": 0,
+        "last_latency_ms": 0.5760000203736126
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.032102728738504,
+        "per_drone": {
+          "1": 101
+        },
+        "receive_age_ms": {
+          "1": 31.000000017229468
+        },
+        "source_age_ms": {
+          "1": 0.127197265625
+        },
+        "total": 101
+      },
+      "timestamp": "2026-08-29T15:35:13.660509Z"
+    },
+    {
+      "at_seconds": 15.094000000040978,
+      "client_lifecycle_cycles": 30,
+      "core_process": {
+        "handles": 184,
+        "os_threads": 11,
+        "private_bytes": 57503744,
+        "rss_bytes": 74641408
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.0,
+        "render_skipped": 60,
+        "render_total": 91,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 207,
+        "os_threads": 16,
+        "private_bytes": 29782016,
+        "rss_bytes": 41877504
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 35,
+        "errors": 0,
+        "last_latency_ms": 0.5795999895781279
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.0,
+        "per_drone": {
+          "1": 151
+        },
+        "receive_age_ms": {
+          "1": 31.000000017229468
+        },
+        "source_age_ms": {
+          "1": 0.481689453125
+        },
+        "total": 151
+      },
+      "timestamp": "2026-08-29T15:35:18.652484Z"
+    },
+    {
+      "at_seconds": 20.094000000040978,
+      "client_lifecycle_cycles": 40,
+      "core_process": {
+        "handles": 184,
+        "os_threads": 11,
+        "private_bytes": 57733120,
+        "rss_bytes": 74829824
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.018054162504328,
+        "render_skipped": 80,
+        "render_total": 121,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1000.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 207,
+        "os_threads": 16,
+        "private_bytes": 29794304,
+        "rss_bytes": 41889792
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 46,
+        "errors": 0,
+        "last_latency_ms": 0.6409999914467335
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.0,
+        "per_drone": {
+          "1": 201
+        },
+        "receive_age_ms": {
+          "1": 31.000000017229468
+        },
+        "source_age_ms": {
+          "1": 0.420654296875
+        },
+        "total": 201
+      },
+      "timestamp": "2026-08-29T15:35:23.652677Z"
+    },
+    {
+      "at_seconds": 25.094000000040978,
+      "client_lifecycle_cycles": 50,
+      "core_process": {
+        "handles": 184,
+        "os_threads": 11,
+        "private_bytes": 57339904,
+        "rss_bytes": 74489856
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "steady",
+      "presentation": {
+        "render_rate_hz": 6.0,
+        "render_skipped": 100,
+        "render_total": 151,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1016.0000000032596,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 207,
+        "os_threads": 16,
+        "private_bytes": 29794304,
+        "rss_bytes": 41897984
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 57,
+        "errors": 0,
+        "last_latency_ms": 0.6091000395826995
+      },
+      "telemetry": {
+        "ingest_rate_hz": 10.0,
+        "per_drone": {
+          "1": 251
+        },
+        "receive_age_ms": {
+          "1": 31.000000017229468
+        },
+        "source_age_ms": {
+          "1": 0.578125
+        },
+        "total": 251
+      },
+      "timestamp": "2026-08-29T15:35:28.652768Z"
+    },
+    {
+      "at_seconds": 25.20400000002701,
+      "client_lifecycle_cycles": 50,
+      "core_process": {
+        "handles": 184,
+        "os_threads": 11,
+        "private_bytes": 57339904,
+        "rss_bytes": 74489856
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "final",
+      "presentation": {
+        "render_rate_hz": 0.0,
+        "render_skipped": 100,
+        "render_total": 152,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 1016.0000000032596,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 207,
+        "os_threads": 16,
+        "private_bytes": 29794304,
+        "rss_bytes": 41906176
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 57,
+        "errors": 0,
+        "last_latency_ms": 0.6091000395826995
+      },
+      "telemetry": {
+        "ingest_rate_hz": 9.090909092063622,
+        "per_drone": {
+          "1": 252
+        },
+        "receive_age_ms": {
+          "1": 32.00000000651926
+        },
+        "source_age_ms": {
+          "1": 1.00341796875
+        },
+        "total": 252
+      },
+      "timestamp": "2026-08-29T15:35:28.770300Z"
+    }
+  ],
+  "scenario": "client-lifecycle",
+  "schema": "dronegod.v3.s12.endurance/v1",
+  "source": {
+    "git_branch": "ai-main",
+    "git_commit": "ffc278e99c228f1ee330585af4b5a251c4d2b8b3",
+    "workspace_dirty": true
+  },
+  "start_reason": "operator launched canonical S12 harness",
+  "started_at": "2026-08-29T15:35:03.311018Z"
+}

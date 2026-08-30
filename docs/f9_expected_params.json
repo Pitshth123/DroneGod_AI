@@ -1,0 +1,60 @@
+{
+  "profile": "ArduCopter hardware-bench baseline",
+  "notes": "Read-only audit policy. Exact failsafe action must still be approved by the team before F9B; this baseline only rejects clearly disabled critical protections.",
+  "parameters": [
+    {
+      "name": "MAV_GCS_SYSID",
+      "aliases": ["SYSID_MYGCS"],
+      "required": true,
+      "min": 1,
+      "max": 255,
+      "equals_env": "SWARMGOD_MAVLINK_SYSID",
+      "purpose": "FC must accept commands from the same GCS system id used by Core; supports current and legacy ArduPilot names"
+    },
+    {
+      "name": "FS_GCS_ENABLE",
+      "required": true,
+      "nonzero": true,
+      "purpose": "Core/GCS disappearance must not be silently ignored by the FC"
+    },
+    {
+      "name": "ARMING_SKIPCHK",
+      "required": false,
+      "equals": 0,
+      "purpose": "Current ArduPilot: no global pre-arm check skip mask"
+    },
+    {
+      "name": "ARMING_CHECK",
+      "required": false,
+      "nonzero": true,
+      "purpose": "Legacy ArduPilot: pre-arm safety checks must not be globally disabled"
+    },
+    {
+      "name": "BATT_FS_CRT_ACT",
+      "required": true,
+      "nonzero": true,
+      "purpose": "Critical battery must have an onboard action independent of the cockpit"
+    },
+    {
+      "name": "BATT_FS_LOW_ACT",
+      "required": false,
+      "purpose": "Captured for team review; low-battery action may depend on field policy"
+    },
+    {
+      "name": "FS_OPTIONS",
+      "required": false,
+      "purpose": "Captured because option bits can change GCS/battery failsafe behavior"
+    },
+    {
+      "name": "FENCE_ENABLE",
+      "required": false,
+      "purpose": "Captured for comparison with Core geofence/radius policy"
+    }
+  ],
+  "required_any": [
+    {
+      "names": ["ARMING_SKIPCHK", "ARMING_CHECK"],
+      "purpose": "At least one supported ArduPilot pre-arm safety control must be present"
+    }
+  ]
+}

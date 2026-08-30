@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x19swarmgod/v1/mission.proto\x12\x0bswarmgod.v1\"\x89\x01\n\x0fMissionWaypoint\x12\x0b\n\x03seq\x18\x01 \x01(\x05\x12\x0b\n\x03lat\x18\x02 \x01(\x01\x12\x0b\n\x03lon\x18\x03 \x01(\x01\x12\x0b\n\x03\x61lt\x18\x04 \x01(\x01\x12\x14\n\x0cwait_seconds\x18\x05 \x01(\x05\x12,\n\x06\x61\x63tion\x18\x06 \x01(\x0e\x32\x1c.swarmgod.v1.MissionWpAction\"N\n\x0cMissionRoute\x12\x10\n\x08\x64rone_id\x18\x01 \x01(\r\x12,\n\x06points\x18\x02 \x03(\x0b\x32\x1c.swarmgod.v1.MissionWaypoint\"\xc7\x01\n\x0bMissionPlan\x12\x0f\n\x07plan_id\x18\x01 \x01(\t\x12&\n\x04mode\x18\x02 \x01(\x0e\x32\x18.swarmgod.v1.MissionMode\x12\x14\n\x0cparticipants\x18\x03 \x03(\r\x12)\n\x06routes\x18\x04 \x03(\x0b\x32\x19.swarmgod.v1.MissionRoute\x12\x11\n\tleader_id\x18\x05 \x01(\r\x12\x18\n\x10\x61rrival_radius_m\x18\x06 \x01(\x01\x12\x11\n\trtl_after\x18\x07 \x01(\x08\"S\n\x13StartMissionRequest\x12&\n\x04plan\x18\x01 \x01(\x0b\x32\x18.swarmgod.v1.MissionPlan\x12\x14\n\x0coperation_id\x18\x02 \x01(\t\"p\n\x14StartMissionResponse\x12\n\n\x02ok\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\x12\x0e\n\x06run_id\x18\x03 \x01(\x04\x12+\n\x05state\x18\x04 \x01(\x0e\x32\x1c.swarmgod.v1.MissionRunState\":\n\x14\x43\x61ncelMissionRequest\x12\x0e\n\x06run_id\x18\x01 \x01(\x04\x12\x12\n\nrequest_id\x18\x02 \x01(\t\"\x18\n\x16GetMissionStateRequest\"Q\n\x0bMissionWait\x12\r\n\x05scope\x18\x01 \x01(\r\x12\r\n\x05index\x18\x02 \x01(\x05\x12\x13\n\x0bremaining_s\x18\x03 \x01(\x01\x12\x0f\n\x07total_s\x18\x04 \x01(\x05\"\xbc\x03\n\x14MissionStateResponse\x12\x0e\n\x06\x61\x63tive\x18\x01 \x01(\x08\x12\x0e\n\x06run_id\x18\x02 \x01(\x04\x12\x0f\n\x07plan_id\x18\x03 \x01(\t\x12&\n\x04mode\x18\x04 \x01(\x0e\x32\x18.swarmgod.v1.MissionMode\x12+\n\x05state\x18\x05 \x01(\x0e\x32\x1c.swarmgod.v1.MissionRunState\x12\x10\n\x08revision\x18\x06 \x01(\x04\x12\x14\n\x0cparticipants\x18\x07 \x03(\r\x12\x15\n\rcurrent_index\x18\x08 \x01(\x05\x12\x42\n\tsep_index\x18\t \x03(\x0b\x32/.swarmgod.v1.MissionStateResponse.SepIndexEntry\x12\x0f\n\x07\x61rrived\x18\n \x03(\r\x12\'\n\x05waits\x18\x0b \x03(\x0b\x32\x18.swarmgod.v1.MissionWait\x12\x17\n\x0flast_transition\x18\x0c \x01(\t\x12\x17\n\x0fterminal_reason\x18\r \x01(\t\x1a/\n\rSepIndexEntry\x12\x0b\n\x03key\x18\x01 \x01(\r\x12\r\n\x05value\x18\x02 \x01(\x05:\x02\x38\x01*a\n\x0bMissionMode\x12\x18\n\x14MISSION_MODE_GROUPED\x10\x00\x12\x19\n\x15MISSION_MODE_SEPARATE\x10\x01\x12\x1d\n\x19MISSION_MODE_SWARM_LEADER\x10\x02*k\n\x0fMissionWpAction\x12\x1a\n\x16MISSION_WP_ACTION_NONE\x10\x00\x12\x1d\n\x19MISSION_WP_ACTION_SERVO_A\x10\x01\x12\x1d\n\x19MISSION_WP_ACTION_SERVO_B\x10\x02*\xa7\x02\n\x0fMissionRunState\x12\x16\n\x12MISSION_STATE_IDLE\x10\x00\x12\x1c\n\x18MISSION_STATE_VALIDATING\x10\x01\x12\x17\n\x13MISSION_STATE_READY\x10\x02\x12\x19\n\x15MISSION_STATE_RUNNING\x10\x03\x12\x19\n\x15MISSION_STATE_WAITING\x10\x04\x12\x1c\n\x18MISSION_STATE_CANCELLING\x10\x05\x12\x1b\n\x17MISSION_STATE_CANCELLED\x10\x06\x12\x1d\n\x19MISSION_STATE_INTERRUPTED\x10\x07\x12\x18\n\x14MISSION_STATE_FAILED\x10\x08\x12\x1b\n\x17MISSION_STATE_COMPLETED\x10\tB8Z6github.com/swarmgod/backend/gen/swarmgod/v1;swarmgodv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x19swarmgod/v1/mission.proto\x12\x0bswarmgod.v1\"\x89\x01\n\x0fMissionWaypoint\x12\x0b\n\x03seq\x18\x01 \x01(\x05\x12\x0b\n\x03lat\x18\x02 \x01(\x01\x12\x0b\n\x03lon\x18\x03 \x01(\x01\x12\x0b\n\x03\x61lt\x18\x04 \x01(\x01\x12\x14\n\x0cwait_seconds\x18\x05 \x01(\x05\x12,\n\x06\x61\x63tion\x18\x06 \x01(\x0e\x32\x1c.swarmgod.v1.MissionWpAction\"N\n\x0cMissionRoute\x12\x10\n\x08\x64rone_id\x18\x01 \x01(\r\x12,\n\x06points\x18\x02 \x03(\x0b\x32\x1c.swarmgod.v1.MissionWaypoint\"\xda\x03\n\x0bMissionPlan\x12\x0f\n\x07plan_id\x18\x01 \x01(\t\x12&\n\x04mode\x18\x02 \x01(\x0e\x32\x18.swarmgod.v1.MissionMode\x12\x14\n\x0cparticipants\x18\x03 \x03(\r\x12)\n\x06routes\x18\x04 \x03(\x0b\x32\x19.swarmgod.v1.MissionRoute\x12\x11\n\tleader_id\x18\x05 \x01(\r\x12\x18\n\x10\x61rrival_radius_m\x18\x06 \x01(\x01\x12\x11\n\trtl_after\x18\x07 \x01(\x08\x12Q\n\x15participant_altitudes\x18\x08 \x03(\x0b\x32\x32.swarmgod.v1.MissionPlan.ParticipantAltitudesEntry\x12\x37\n\rreturn_policy\x18\t \x01(\x0e\x32 .swarmgod.v1.MissionReturnPolicy\x12H\n\x16separate_return_timing\x18\n \x01(\x0e\x32(.swarmgod.v1.MissionSeparateReturnTiming\x1a;\n\x19ParticipantAltitudesEntry\x12\x0b\n\x03key\x18\x01 \x01(\r\x12\r\n\x05value\x18\x02 \x01(\x01:\x02\x38\x01\"S\n\x13StartMissionRequest\x12&\n\x04plan\x18\x01 \x01(\x0b\x32\x18.swarmgod.v1.MissionPlan\x12\x14\n\x0coperation_id\x18\x02 \x01(\t\"\x8a\x01\n\x14StartMissionResponse\x12\n\n\x02ok\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\x12\x0e\n\x06run_id\x18\x03 \x01(\x04\x12+\n\x05state\x18\x04 \x01(\x0e\x32\x1c.swarmgod.v1.MissionRunState\x12\x18\n\x10\x61uthority_active\x18\x05 \x01(\x08\":\n\x14\x43\x61ncelMissionRequest\x12\x0e\n\x06run_id\x18\x01 \x01(\x04\x12\x12\n\nrequest_id\x18\x02 \x01(\t\"\x18\n\x16GetMissionStateRequest\"Q\n\x0bMissionWait\x12\r\n\x05scope\x18\x01 \x01(\r\x12\r\n\x05index\x18\x02 \x01(\x05\x12\x13\n\x0bremaining_s\x18\x03 \x01(\x01\x12\x0f\n\x07total_s\x18\x04 \x01(\x05\"g\n\x1bMissionParticipantRejection\x12\x0e\n\x06run_id\x18\x01 \x01(\x04\x12\x16\n\x0ewaypoint_index\x18\x02 \x01(\x05\x12\x10\n\x08\x64rone_id\x18\x03 \x01(\r\x12\x0e\n\x06reason\x18\x04 \x01(\t\"\xee\t\n\x14MissionStateResponse\x12\x0e\n\x06\x61\x63tive\x18\x01 \x01(\x08\x12\x0e\n\x06run_id\x18\x02 \x01(\x04\x12\x0f\n\x07plan_id\x18\x03 \x01(\t\x12&\n\x04mode\x18\x04 \x01(\x0e\x32\x18.swarmgod.v1.MissionMode\x12+\n\x05state\x18\x05 \x01(\x0e\x32\x1c.swarmgod.v1.MissionRunState\x12\x10\n\x08revision\x18\x06 \x01(\x04\x12\x14\n\x0cparticipants\x18\x07 \x03(\r\x12\x15\n\rcurrent_index\x18\x08 \x01(\x05\x12\x42\n\tsep_index\x18\t \x03(\x0b\x32/.swarmgod.v1.MissionStateResponse.SepIndexEntry\x12\x0f\n\x07\x61rrived\x18\n \x03(\r\x12\'\n\x05waits\x18\x0b \x03(\x0b\x32\x18.swarmgod.v1.MissionWait\x12\x17\n\x0flast_transition\x18\x0c \x01(\t\x12\x17\n\x0fterminal_reason\x18\r \x01(\t\x12\x18\n\x10\x61uthority_active\x18\x0e \x01(\x08\x12&\n\x04plan\x18\x0f \x01(\x0b\x32\x18.swarmgod.v1.MissionPlan\x12H\n\x16participant_rejections\x18\x10 \x03(\x0b\x32(.swarmgod.v1.MissionParticipantRejection\x12\x19\n\x11recovery_required\x18\x11 \x01(\x08\x12=\n\x17recovery_previous_state\x18\x12 \x01(\x0e\x32\x1c.swarmgod.v1.MissionRunState\x12\x17\n\x0frecovery_reason\x18\x13 \x01(\t\x12\"\n\x1apersistence_schema_version\x18\x14 \x01(\r\x12\x1a\n\x12persisted_revision\x18\x15 \x01(\x04\x12\x17\n\x0f\x61uthority_scope\x18\x16 \x01(\t\x12\x19\n\x11origin_session_id\x18\x17 \x01(\t\x12\x17\n\x0f\x63ore_session_id\x18\x18 \x01(\t\x12\x1e\n\x16persistence_compatible\x18\x19 \x01(\x08\x12\x19\n\x11persistence_fault\x18\x1a \x01(\t\x12\x14\n\x0coperation_id\x18\x1b \x01(\t\x12@\n\x16resolved_return_policy\x18\x1c \x01(\x0e\x32 .swarmgod.v1.MissionReturnPolicy\x12\x35\n\x0creturn_state\x18\x1d \x01(\x0e\x32\x1f.swarmgod.v1.MissionReturnState\x12\x1b\n\x13return_participants\x18\x1e \x03(\r\x12\x15\n\rreturn_reason\x18\x1f \x01(\t\x12\x19\n\x11\x63urrent_leader_id\x18  \x01(\r\x12\x1b\n\x13\x61\x63tive_participants\x18! \x03(\r\x12\x1d\n\x15\x65xcluded_participants\x18\" \x03(\r\x12\x19\n\x11succession_reason\x18# \x01(\t\x12\x18\n\x10swarm_generation\x18$ \x01(\x04\x12\x1a\n\x12succession_pending\x18% \x01(\x08\x1a/\n\rSepIndexEntry\x12\x0b\n\x03key\x18\x01 \x01(\r\x12\r\n\x05value\x18\x02 \x01(\x05:\x02\x38\x01*a\n\x0bMissionMode\x12\x18\n\x14MISSION_MODE_GROUPED\x10\x00\x12\x19\n\x15MISSION_MODE_SEPARATE\x10\x01\x12\x1d\n\x19MISSION_MODE_SWARM_LEADER\x10\x02*k\n\x0fMissionWpAction\x12\x1a\n\x16MISSION_WP_ACTION_NONE\x10\x00\x12\x1d\n\x19MISSION_WP_ACTION_SERVO_A\x10\x01\x12\x1d\n\x19MISSION_WP_ACTION_SERVO_B\x10\x02*\xa7\x02\n\x0fMissionRunState\x12\x16\n\x12MISSION_STATE_IDLE\x10\x00\x12\x1c\n\x18MISSION_STATE_VALIDATING\x10\x01\x12\x17\n\x13MISSION_STATE_READY\x10\x02\x12\x19\n\x15MISSION_STATE_RUNNING\x10\x03\x12\x19\n\x15MISSION_STATE_WAITING\x10\x04\x12\x1c\n\x18MISSION_STATE_CANCELLING\x10\x05\x12\x1b\n\x17MISSION_STATE_CANCELLED\x10\x06\x12\x1d\n\x19MISSION_STATE_INTERRUPTED\x10\x07\x12\x18\n\x14MISSION_STATE_FAILED\x10\x08\x12\x1b\n\x17MISSION_STATE_COMPLETED\x10\t*\xe4\x01\n\x13MissionReturnPolicy\x12%\n!MISSION_RETURN_POLICY_UNSPECIFIED\x10\x00\x12\x1e\n\x1aMISSION_RETURN_POLICY_NONE\x10\x01\x12/\n+MISSION_RETURN_POLICY_RTL_ALL_AFTER_MISSION\x10\x02\x12&\n\"MISSION_RETURN_POLICY_SWARM_RETURN\x10\x03\x12-\n)MISSION_RETURN_POLICY_WAVE_MANAGED_RETURN\x10\x04*\xb6\x01\n\x1bMissionSeparateReturnTiming\x12.\n*MISSION_SEPARATE_RETURN_TIMING_UNSPECIFIED\x10\x00\x12\x33\n/MISSION_SEPARATE_RETURN_ALL_ON_MISSION_COMPLETE\x10\x01\x12\x32\n.MISSION_SEPARATE_RETURN_EACH_ON_ROUTE_COMPLETE\x10\x02*\x93\x02\n\x12MissionReturnState\x12!\n\x1dMISSION_RETURN_STATE_INACTIVE\x10\x00\x12 \n\x1cMISSION_RETURN_STATE_PENDING\x10\x01\x12\"\n\x1eMISSION_RETURN_STATE_RETURNING\x10\x02\x12\"\n\x1eMISSION_RETURN_STATE_COMPLETED\x10\x03\x12#\n\x1fMISSION_RETURN_STATE_SUPPRESSED\x10\x04\x12\x1f\n\x1bMISSION_RETURN_STATE_FAILED\x10\x05\x12*\n&MISSION_RETURN_STATE_RECOVERY_REQUIRED\x10\x06\x42\x38Z6github.com/swarmgod/backend/gen/swarmgod/v1;swarmgodv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,32 +32,44 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'swarmgod.v1.mission_pb2', _
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'Z6github.com/swarmgod/backend/gen/swarmgod/v1;swarmgodv1'
+  _globals['_MISSIONPLAN_PARTICIPANTALTITUDESENTRY']._loaded_options = None
+  _globals['_MISSIONPLAN_PARTICIPANTALTITUDESENTRY']._serialized_options = b'8\001'
   _globals['_MISSIONSTATERESPONSE_SEPINDEXENTRY']._loaded_options = None
   _globals['_MISSIONSTATERESPONSE_SEPINDEXENTRY']._serialized_options = b'8\001'
-  _globals['_MISSIONMODE']._serialized_start=1279
-  _globals['_MISSIONMODE']._serialized_end=1376
-  _globals['_MISSIONWPACTION']._serialized_start=1378
-  _globals['_MISSIONWPACTION']._serialized_end=1485
-  _globals['_MISSIONRUNSTATE']._serialized_start=1488
-  _globals['_MISSIONRUNSTATE']._serialized_end=1783
+  _globals['_MISSIONMODE']._serialized_start=2504
+  _globals['_MISSIONMODE']._serialized_end=2601
+  _globals['_MISSIONWPACTION']._serialized_start=2603
+  _globals['_MISSIONWPACTION']._serialized_end=2710
+  _globals['_MISSIONRUNSTATE']._serialized_start=2713
+  _globals['_MISSIONRUNSTATE']._serialized_end=3008
+  _globals['_MISSIONRETURNPOLICY']._serialized_start=3011
+  _globals['_MISSIONRETURNPOLICY']._serialized_end=3239
+  _globals['_MISSIONSEPARATERETURNTIMING']._serialized_start=3242
+  _globals['_MISSIONSEPARATERETURNTIMING']._serialized_end=3424
+  _globals['_MISSIONRETURNSTATE']._serialized_start=3427
+  _globals['_MISSIONRETURNSTATE']._serialized_end=3702
   _globals['_MISSIONWAYPOINT']._serialized_start=43
   _globals['_MISSIONWAYPOINT']._serialized_end=180
   _globals['_MISSIONROUTE']._serialized_start=182
   _globals['_MISSIONROUTE']._serialized_end=260
   _globals['_MISSIONPLAN']._serialized_start=263
-  _globals['_MISSIONPLAN']._serialized_end=462
-  _globals['_STARTMISSIONREQUEST']._serialized_start=464
-  _globals['_STARTMISSIONREQUEST']._serialized_end=547
-  _globals['_STARTMISSIONRESPONSE']._serialized_start=549
-  _globals['_STARTMISSIONRESPONSE']._serialized_end=661
-  _globals['_CANCELMISSIONREQUEST']._serialized_start=663
-  _globals['_CANCELMISSIONREQUEST']._serialized_end=721
-  _globals['_GETMISSIONSTATEREQUEST']._serialized_start=723
-  _globals['_GETMISSIONSTATEREQUEST']._serialized_end=747
-  _globals['_MISSIONWAIT']._serialized_start=749
-  _globals['_MISSIONWAIT']._serialized_end=830
-  _globals['_MISSIONSTATERESPONSE']._serialized_start=833
-  _globals['_MISSIONSTATERESPONSE']._serialized_end=1277
-  _globals['_MISSIONSTATERESPONSE_SEPINDEXENTRY']._serialized_start=1230
-  _globals['_MISSIONSTATERESPONSE_SEPINDEXENTRY']._serialized_end=1277
+  _globals['_MISSIONPLAN']._serialized_end=737
+  _globals['_MISSIONPLAN_PARTICIPANTALTITUDESENTRY']._serialized_start=678
+  _globals['_MISSIONPLAN_PARTICIPANTALTITUDESENTRY']._serialized_end=737
+  _globals['_STARTMISSIONREQUEST']._serialized_start=739
+  _globals['_STARTMISSIONREQUEST']._serialized_end=822
+  _globals['_STARTMISSIONRESPONSE']._serialized_start=825
+  _globals['_STARTMISSIONRESPONSE']._serialized_end=963
+  _globals['_CANCELMISSIONREQUEST']._serialized_start=965
+  _globals['_CANCELMISSIONREQUEST']._serialized_end=1023
+  _globals['_GETMISSIONSTATEREQUEST']._serialized_start=1025
+  _globals['_GETMISSIONSTATEREQUEST']._serialized_end=1049
+  _globals['_MISSIONWAIT']._serialized_start=1051
+  _globals['_MISSIONWAIT']._serialized_end=1132
+  _globals['_MISSIONPARTICIPANTREJECTION']._serialized_start=1134
+  _globals['_MISSIONPARTICIPANTREJECTION']._serialized_end=1237
+  _globals['_MISSIONSTATERESPONSE']._serialized_start=1240
+  _globals['_MISSIONSTATERESPONSE']._serialized_end=2502
+  _globals['_MISSIONSTATERESPONSE_SEPINDEXENTRY']._serialized_start=2455
+  _globals['_MISSIONSTATERESPONSE_SEPINDEXENTRY']._serialized_end=2502
 # @@protoc_insertion_point(module_scope)

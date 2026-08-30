@@ -1,0 +1,182 @@
+{
+  "acceptance": {
+    "completed_requested_duration": false,
+    "evidence_parseable": true,
+    "hard_failures": [
+      "AttributeError: module 'swarmgod.v1.service_pb2' has no attribute 'SubscribeTelemetryRequest'"
+    ],
+    "investigate": [],
+    "telemetry_required": true
+  },
+  "actual_duration_seconds": 0.1720000000204891,
+  "aggregates": {
+    "core_os_threads": {
+      "delta": 0.0,
+      "end": 11.0,
+      "max": 11.0,
+      "mean": 11.0,
+      "min": 11.0,
+      "samples": 1,
+      "start": 11.0
+    },
+    "core_rss_bytes": {
+      "delta": 0.0,
+      "end": 140902400.0,
+      "max": 140902400.0,
+      "mean": 140902400.0,
+      "min": 140902400.0,
+      "samples": 1,
+      "start": 140902400.0
+    },
+    "python_os_threads": {
+      "delta": 0.0,
+      "end": 14.0,
+      "max": 14.0,
+      "mean": 14.0,
+      "min": 14.0,
+      "samples": 1,
+      "start": 14.0
+    },
+    "python_private_bytes": {
+      "delta": 0.0,
+      "end": 27979776.0,
+      "max": 27979776.0,
+      "mean": 27979776.0,
+      "min": 27979776.0,
+      "samples": 1,
+      "start": 27979776.0
+    },
+    "python_rss_bytes": {
+      "delta": 0.0,
+      "end": 40914944.0,
+      "max": 40914944.0,
+      "mean": 40914944.0,
+      "min": 40914944.0,
+      "samples": 1,
+      "start": 40914944.0
+    },
+    "render_skip_percent": null,
+    "render_skipped": 0,
+    "render_total": 0,
+    "rpc_latency_ms": {
+      "delta": -18.360699992626905,
+      "end": 20.791699993424118,
+      "max": 39.15239998605102,
+      "mean": 29.97204998973757,
+      "min": 20.791699993424118,
+      "samples": 2,
+      "start": 39.15239998605102
+    }
+  },
+  "authority_token_observed_locally": "core-single-wait",
+  "availability": {
+    "core_os_threads": true,
+    "core_rss": true,
+    "go_goroutines": "NOT CURRENTLY EXPOSED",
+    "native_grpc_threads_separate_from_process_threads": "NOT CURRENTLY EXPOSED",
+    "python_os_threads_including_native_grpc": true,
+    "python_private_bytes": true,
+    "python_rss": true,
+    "real_gui_frame_timing": "NOT CURRENTLY EXPOSED; presentation gate exercised"
+  },
+  "cleanup": {
+    "external_core_and_sitl_left_running": true,
+    "owned_client_closed": true,
+    "owned_stream_closed": true
+  },
+  "counters": {
+    "client_lifecycle_cycles": 0,
+    "mission_start_cancel_cycles": 0,
+    "mission_transitions": 0,
+    "reconnects": 0,
+    "rpc_calls": 2,
+    "rpc_errors": 0,
+    "stream_errors": 0,
+    "telemetry_per_drone": {},
+    "telemetry_total": 0,
+    "ui_stalls": 0
+  },
+  "end_reason": "AttributeError: module 'swarmgod.v1.service_pb2' has no attribute 'SubscribeTelemetryRequest'",
+  "errors": {
+    "rpc": [],
+    "stream": []
+  },
+  "file_growth": {
+    "database_delta_bytes": 0,
+    "database_end_bytes": 4096,
+    "database_path": "backend\\logs\\s12-smoke.db",
+    "database_start_bytes": 4096,
+    "log_delta_bytes": 74,
+    "log_end_bytes": 7695788,
+    "log_path": "backend\\logs",
+    "log_start_bytes": 7695714
+  },
+  "generated_at": "2026-08-29T15:32:06.885827Z",
+  "participant_count": 1,
+  "processes": {
+    "core_or_sitl_processes_owned": false,
+    "core_pid": 11456,
+    "core_restart_or_crash_count": 0,
+    "owned_child_processes": [],
+    "recorder_pid": 23808
+  },
+  "profile": "sitl",
+  "requested_duration": "45s",
+  "requested_duration_seconds": 45.0,
+  "result": "FAIL",
+  "sample_interval_seconds": 5.0,
+  "samples": [
+    {
+      "at_seconds": 0.0,
+      "client_lifecycle_cycles": 0,
+      "core_process": {
+        "handles": 176,
+        "os_threads": 11,
+        "private_bytes": 124317696,
+        "rss_bytes": 140902400
+      },
+      "mission": {
+        "cycles": 0,
+        "transitions": 0
+      },
+      "phase": "initial-failure",
+      "presentation": {
+        "render_rate_hz": 0.0,
+        "render_skipped": 0,
+        "render_total": 0,
+        "stall_count": 0,
+        "ui_heartbeat_ms": 0.0,
+        "ui_status": "HEALTHY"
+      },
+      "python_process": {
+        "handles": 197,
+        "os_threads": 14,
+        "private_bytes": 27979776,
+        "rss_bytes": 40914944
+      },
+      "reconnect_count": 0,
+      "rpc": {
+        "calls": 2,
+        "errors": 0,
+        "last_latency_ms": 20.791699993424118
+      },
+      "telemetry": {
+        "ingest_rate_hz": 0.0,
+        "per_drone": {},
+        "receive_age_ms": {},
+        "source_age_ms": {},
+        "total": 0
+      },
+      "timestamp": "2026-08-29T15:32:06.717019Z"
+    }
+  ],
+  "scenario": "idle-connected",
+  "schema": "dronegod.v3.s12.endurance/v1",
+  "source": {
+    "git_branch": "ai-main",
+    "git_commit": "ffc278e99c228f1ee330585af4b5a251c4d2b8b3",
+    "workspace_dirty": true
+  },
+  "start_reason": "operator launched canonical S12 harness",
+  "started_at": "2026-08-29T15:32:06.348453Z"
+}

@@ -32,6 +32,7 @@ from .core.theme import (
     drone_color, badge_style, DRONE_COLORS, set_drone_color,
 )
 from .core.grpc_client import CoreClient, TelemetryThread, EventThread
+from .core.command_gateway import CommandGateway
 from .core.field_server import (
     FieldServer, SessionStore, TelemetryHub, DEFAULT_PORT as DEFAULT_FIELD_PORT,
 )
@@ -42,6 +43,7 @@ from .core.pinger import PingService
 from .core.ip_store import IpStore
 from .core.group_store import GroupStore
 from .core.health_monitor import HealthMonitor
+from .core.telemetry_store import TelemetryRenderGate, TelemetryStore
 from .core import settings_io
 from .core import rpc
 from .widgets.controls import SliderField, Segmented, CapsuleSwitch, AccordionSection
@@ -132,6 +134,10 @@ class GroundStation(QMainWindow):
             from PyQt5.QtGui import QIcon as _QIcon
             self.setWindowIcon(_QIcon(_icon))
         self.resize(1360, 820)
+        # Lifecycle guard for queued QTimer/web callbacks.  closeEvent flips this
+        # before tearing down QtWebEngine so a pending callback never touches a
+        # destroyed-but-not-None QWebEngineView (native access-violation class).
+        self._closing = False
         # 1.0 = ขนาดที่ออกแบบไว้ (ดู theme.BASE_BOOST) ผู้ใช้ปรับจากตรงนี้ได้
         self._font_scale = 1.0
         # sync ค่า global ของ theme.py ให้ตรงกับ instance นี้ทันที ก่อนสร้าง widget ไหน ๆ —
@@ -140,6 +146,15 @@ class GroundStation(QMainWindow):
         self.setStyleSheet(build_stylesheet())
 
         self.client = CoreClient(core_addr)
+        # GroundStation owns the transport client it creates. Tests may replace
+        # self.client with a fake later, but the original channel still needs a
+        # deterministic shutdown to avoid leaking native gRPC poll threads.
+        self._owned_core_client = self.client
+        # V3-S07: single observable command boundary. Provider pattern so tests
+        # that replace self.client with a fake are still routed correctly; the
+        # gateway never captures a CoreClient reference. Pass-through only —
+        # no retry/dedup/reorder/policy; authority/safety stay in Go.
+        self._gateway = CommandGateway(lambda: self.client)
         self.telem_thread = None
         self.fleet_items = {}        # drone_id -> FleetItem
         self._removed_ids = set()    # ลบแล้ว — อย่าให้ telemetry ใส่กลับ
@@ -161,7 +176,13 @@ class GroundStation(QMainWindow):
         self._last_seen = {}         # drone_id -> เวลาที่ได้ telemetry ล่าสุด (ใช้ตัดสิน online)
         self._last_telem_log = {}    # drone_id -> เวลาที่ log telemetry ล่าสุด (throttle เฉย ๆ)
         self._last_alt = {}
-        self._last_telem = {}        # drone_id -> Telemetry (ล่าสุด)
+        self._last_telem = {}        # drone_id -> Telemetry (legacy compatibility / flight-business reads)
+        # V1 Phase 3: frontend-only immutable telemetry read model.  Safety/Mission/
+        # command decisions keep using Core/raw compatibility state until their own
+        # migration phase; this store is presentation + observability only.
+        self._telemetry_store = TelemetryStore()
+        self._telemetry_render_gate = TelemetryRenderGate(min_interval_s=0.10)
+        self._telemetry_shadow_mismatch_count = 0
         # เส้นทางที่ผ่านมาให้ Field Tablet: เก็บเป็นพิกัดล้วนและจำกัดจำนวนจุด
         # เพื่อให้เปิดเว็บกลางภารกิจแล้วเห็นเส้นทางก่อนหน้าได้ โดยไม่ส่งข้อมูลหนักเกิน LAN
         self._field_trails = {}       # drone_id -> [[lat, lon], ...]
@@ -260,6 +281,16 @@ class GroundStation(QMainWindow):
         self._wp_target_ids = []
         self._wp_arrived = set()          # drone_id ที่ถึงจุดปัจจุบันแล้ว (GROUPED)
         self._wp_key = 0                  # key ที่ใช้เรียก JS (0 = เส้นทางร่วม)
+        # F6 restartable cockpit: these are display/cache mirrors of Core state,
+        # never waypoint authority. Core state refresh owns their values while
+        # _mission_core_authority is true.
+        self._mission_core_authority = False
+        self._mission_core_state = None
+        self._mission_recovery_required = False
+        self._mission_state_query_busy = False
+        self._mission_state_last_query = 0.0
+        self._mission_shadow_run_id = 0
+        self._mission_shadow_operation_id = ""
         # ── WAIT execution state (spec §6) — cancellable ไม่ใช้ singleShot ยาว ──
         # timer เป็นแค่ตัวเรียกตรวจ state ไม่ใช่ business state เอง
         self._wp_waits = {}               # scope_key -> entry (0=GROUPED, drone_id=SEPARATE)
@@ -388,6 +419,12 @@ class GroundStation(QMainWindow):
 
         self._start_stream()
 
+        # F6: on an authority-enabled launch, query the existing Core run once.
+        # Live refresh is telemetry-throttled below instead of using another Qt
+        # timer, avoiding a timer that can outlive a closing/restarting cockpit.
+        if mission_shadow.authority_requested():
+            QTimer.singleShot(100, lambda: mission_shadow.recover(self))
+
         # อุ่นเครื่อง native dialog + gRPC channel ให้เสร็จก่อนผู้ใช้กดปุ่มแรก
         # (ดู _prewarm_ui_paths — แก้อาการ "กด A/B ครั้งแรกแล้วค้างเกือบ 1 วิ")
         QTimer.singleShot(250, self._prewarm_ui_paths)
@@ -437,14 +474,13 @@ class GroundStation(QMainWindow):
             self._log(f"prewarm dialog ล้มเหลว (ไม่กระทบการใช้งาน): {e}",
                       severity="WARNING")
 
-        # channel ให้ thread อุ่นเอง — ไม่ต้องให้ UI รอ
-        def warm_channel():
-            try:
-                import grpc
-                grpc.channel_ready_future(self.client.channel).result(timeout=5)
-            except Exception:
-                pass        # ต่อ core ไม่ได้ตอนนี้ก็ไม่เป็นไร คำสั่งจริงจะ error เองอยู่แล้ว
-        threading.Thread(target=warm_channel, daemon=True).start()
+        # Do not prewarm the gRPC channel with channel_ready_future().  A timed-out
+        # ready future keeps a native connectivity-poll thread alive until it is
+        # explicitly cancelled; repeated cockpit lifecycles can then race channel
+        # shutdown (and previously caused Windows access violations in the full
+        # frontend suite).  The measured first-unary cost is only a few ms, while
+        # the dialog prewarm above saves nearly a second, so deterministic channel
+        # lifecycle is the better trade-off here.
 
     def _save_shot(self, path):
         from PyQt5.QtWidgets import QApplication
@@ -790,8 +826,7 @@ class GroundStation(QMainWindow):
 
         self.sel_card.rtl_req.connect(self._card_rtl)
         self.sel_card.land_req.connect(self._card_land)
-        self.sel_card.hold_req.connect(lambda did: self._card_cmd(
-            "HOLD", did, lambda: self.client.hold([did])))
+        self.sel_card.hold_req.connect(self._card_hold)
         self.sel_card.color_changed.connect(self._on_drone_color)
         self.sel_card.ping_req.connect(self._ping_drone)
         self.sel_card.connect_req.connect(self._card_connect)
@@ -1000,6 +1035,8 @@ class GroundStation(QMainWindow):
             self._jump_map_to(lat, lon, set_gcs=True)
 
     def _js(self, code):
+        if getattr(self, "_closing", False):
+            return
         if self._map_ready and self.web is not None:
             self.web.page().runJavaScript(code)
 
@@ -1063,14 +1100,27 @@ class GroundStation(QMainWindow):
         return QUrl(f"{self.map_url}/map3d.html?lat={lat:.7f}&lon={lon:.7f}"
                     f"&zoom=13&radius=3")
 
+    def _presentation_telemetry_snapshot(self):
+        """Latest read-model snapshot with legacy fallback for unmigrated/test paths."""
+        snap = self._telemetry_store.snapshot()
+        if not snap:
+            return self._last_telem
+        # During the migration a legacy/test path may seed a telemetry object
+        # without passing through _on_telemetry. Preserve it as fallback, while
+        # normal ingested IDs prefer the immutable store view.
+        for did, telemetry in self._last_telem.items():
+            snap.setdefault(int(did), telemetry)
+        return snap
+
     def _map3d_origin(self):
         """จุดกึ่งกลางฉาก 3D: จุดที่กระโดดไปแล้ว > home > ตำแหน่งโดรนล่าสุด > ค่าเริ่มต้น"""
         if self._map_center:
             return self._map_center
         for d in sorted(self._home_pos):
             return self._home_pos[d]
-        for d in sorted(self._last_telem):
-            p = self._last_telem[d].position
+        telemetry = self._presentation_telemetry_snapshot()
+        for d in sorted(telemetry):
+            p = telemetry[d].position
             if p.lat or p.lon:
                 return (p.lat, p.lon)
         return (14.9581695, 102.0986187)
@@ -1172,6 +1222,8 @@ class GroundStation(QMainWindow):
 
     def _js3d(self, code):
         """ยิงคำสั่งเข้าแผนที่ 3D ทุกบานที่เปิดอยู่ (ฝัง + หน้าต่างแยก)"""
+        if getattr(self, "_closing", False):
+            return
         if self._map3d_ready and self.web3d is not None:
             self.web3d.page().runJavaScript(code)
         if self._map3d_win_ready and self.web3d_win is not None:
@@ -1186,7 +1238,7 @@ class GroundStation(QMainWindow):
         if not (self._map3d_ready or self._map3d_win_ready):
             return
         out = self._map_presenter.drone_markers(
-            self._last_telem,
+            self._presentation_telemetry_snapshot(),
             self._drone_names,
             self.group_of,
             color_for=drone_color,
@@ -2095,8 +2147,9 @@ class GroundStation(QMainWindow):
             if ids:
                 # StopAll ยกเลิก return goroutine ใน Core ก่อน HOLD; การเรียก
                 # Hold อย่างเดียวปล่อย fallback RTL เก่ายิงคำสั่งทับภายหลังได้.
-                threading.Thread(target=lambda: self._safe(lambda: self.client.stop_all(ids)),
-                                 daemon=True).start()
+                threading.Thread(target=lambda: self._safe(lambda: self._dispatch_core(
+                    "STOP ALL [wave-timeout]", lambda: self.client.stop_all(ids),
+                    source="wave-timeout", targets=ids)), daemon=True).start()
             self._show_banner("WAVE TIMEOUT — หยุดทั้งชุดแล้ว ไม่เริ่มกลุ่มถัดไป", T("red"))
             return
         if self._wave_phase != "waiting_land":
@@ -2416,7 +2469,10 @@ class GroundStation(QMainWindow):
         dlg = PreflightDialog(
             self, client=self.client, snapshot_fn=self._preflight_snapshot,
             telem_fn=self._preflight_telem, target_ids=ids,
-            log_fn=lambda m: self._log(m, category="COMMAND"))
+            log_fn=lambda m: self._log(m, category="COMMAND"),
+            dispatch_fn=lambda label, invoke, targets: self._dispatch_core(
+                label, invoke, source="preflight", targets=targets,
+                enforce_dedup=False))
         dlg.exec_()
         if dlg.summary.total:
             self._preflight.mark_selftest(dlg.passed, dlg.summary.text())
@@ -2631,7 +2687,10 @@ class GroundStation(QMainWindow):
             ok = 0
             for d in ids:
                 try:
-                    r = self.client.param_set(int(d), "SIM_BATT_VOLTAGE", volts)
+                    r = self._dispatch_core(
+                        "PARAM SET SIM_BATT_VOLTAGE", lambda d=d: self.client.param_set(
+                            int(d), "SIM_BATT_VOLTAGE", volts),
+                        source="sitl-admin", targets=[int(d)], enforce_dedup=False)
                     if getattr(r, "ok", False):
                         ok += 1
                     else:
@@ -3112,6 +3171,12 @@ class GroundStation(QMainWindow):
     def _set_online_count(self, n: int):
         n = max(0, int(n))
         total = len(getattr(self, "fleet_items", {}) or {})
+        # Telemetry arrives per drone; repainting this label + stylesheet on every
+        # packet is wasted Qt re-polish work when the online count did not change.
+        state = (n, total)
+        if getattr(self, "_online_count_state", None) == state:
+            return
+        self._online_count_state = state
         self.lbl_count.setText(f"● {n}/{total} ONLINE" if total else "● 0 ONLINE")
         if n > 0:
             self.lbl_count.setStyleSheet(
@@ -3360,6 +3425,14 @@ class GroundStation(QMainWindow):
     def _on_cmd_result(self, msg: str):
         self._log(msg, category="COMMAND")
         low = (msg or "").lower()
+        # ดึงชื่อคำสั่งหน้าแรกก่อน :
+        title = msg.split(":", 1)[0].strip() if msg else "COMMAND"
+        # V3-S08: a suppressed duplicate (double-click) is NEITHER success NOR
+        # failure — the identical command is already in progress. Show an info
+        # toast so the operator is not told it succeeded or failed.
+        if "in_progress" in low:
+            self._show_toast(f"{title} · คำสั่งเดียวกันกำลังดำเนินการอยู่", "info")
+            return
         failed = (
             "error" in low
             or "ok=false" in low
@@ -3367,8 +3440,6 @@ class GroundStation(QMainWindow):
             or "failed" in low
             or "blocked" in low
         )
-        # ดึงชื่อคำสั่งหน้าแรกก่อน :
-        title = msg.split(":", 1)[0].strip() if msg else "COMMAND"
         if failed:
             detail = msg.split(":", 1)[-1].strip() if ":" in msg else msg
             self._show_toast(f"{title} ล้มเหลว · {detail[:48]}", "err")
@@ -3414,7 +3485,37 @@ class GroundStation(QMainWindow):
             return False
         return True
 
-    def _run_cmd(self, label, fn):
+    def _manual_nav_blocked_by_core(self, action):
+        """Fail closed while a Core-owned mission still owns navigation.
+
+        Ad-hoc GOTO/RC movement must never race an authoritative Core mission.
+        Operator HOLD is handled separately as an explicit takeover through
+        Cancel Navigation, which cancels the mission before issuing stop/hold.
+        """
+        if not bool(getattr(self, "_mission_core_authority", False)):
+            return False
+        label = str(action or "MANUAL NAV")
+        self._log(f"{label} ถูกบล็อก — Core mission ยังถือ flight authority; "
+                  "กด CANCEL NAV/HOLD ก่อนสั่ง manual",
+                  severity="WARNING", category="ALERT")
+        self._show_toast(f"{label} ถูกบล็อก · ยกเลิก Mission ก่อน", "err")
+        return True
+
+    def _dispatch_core(self, label, fn, *, source, targets=(), dedup_key=None,
+                       enforce_dedup=True, operation_id=None):
+        """Single observable boundary for every flight-mutating CoreClient call.
+
+        Internal mission/automation callers set ``enforce_dedup=False`` when an
+        idempotent-family label is used: the gateway still supplies correlation
+        and timing, but never changes orchestration semantics. Emergency/takeover
+        families are never suppressed by the ledger regardless.
+        """
+        return self._gateway.dispatch(
+            label, fn, source=source, targets=targets,
+            dedup_key=dedup_key, enforce_dedup=enforce_dedup,
+            operation_id=operation_id)
+
+    def _run_cmd(self, label, fn, dedup_key=None):
         if not self._guard():
             return
         ids = self._target_ids()
@@ -3425,18 +3526,29 @@ class GroundStation(QMainWindow):
 
         def worker():
             try:
-                r = fn(ids)
-                ok = bool(getattr(r, "ok", True))
-                msg = getattr(r, "message", "") or ""
-                if ok:
-                    self.cmd_result.emit(f"{label}: ok={ok} {msg}".strip())
+                # V3-S07/S08: observable gateway boundary. dedup_key carries the
+                # actual semantic arguments so double-click dedup keys on real
+                # command identity, not the rounded display label.
+                r = self._dispatch_core(
+                    label, lambda: fn(ids), source="cockpit", targets=ids,
+                    dedup_key=dedup_key)
+                if getattr(r, "in_progress", False):
+                    self.cmd_result.emit(
+                        f"{label}: in_progress {getattr(r, 'message', '') or ''}".strip())
                 else:
-                    self.cmd_result.emit(f"{label}: ok=False {msg}".strip())
+                    ok = bool(getattr(r, "ok", True))
+                    msg = getattr(r, "message", "") or ""
+                    if ok:
+                        self.cmd_result.emit(f"{label}: ok={ok} {msg}".strip())
+                    else:
+                        self.cmd_result.emit(f"{label}: ok=False {msg}".strip())
             except Exception as e:
                 self.cmd_result.emit(f"{label}: ERROR {e}")
         threading.Thread(target=worker, daemon=True).start()
 
     def _cmd_arm(self):
+        if self._manual_nav_blocked_by_core("ARM"):
+            return
         # ARM ยังไม่ใช่การขึ้นบิน → เตือนอย่างเดียว ไม่บล็อก (ด่านจริงอยู่ที่ TAKEOFF)
         self._preflight_soft_warn("ARM")
         self._run_cmd("ARM", lambda ids: self.client.arm(ids))
@@ -3453,6 +3565,8 @@ class GroundStation(QMainWindow):
                 f"ถ้าโดรนยังลอยอยู่ จะร่วงทันที",
                 ok_text="DISARM", danger=True):
             return
+        if bool(getattr(self, "_mission_core_authority", False)):
+            self._abort_waypoint_execution()
         self._run_cmd("DISARM", lambda i: self.client.disarm(i, confirmed=True))
 
     # ── Servo A/B (spec: servo.md · A=ch7, B=ch8) ──
@@ -3597,8 +3711,9 @@ class GroundStation(QMainWindow):
                       vehicle=f"Drone {did}", category="STATUS")
             pwm = self.SERVO_PWM_PRIME.get(label, 1200)
             threading.Thread(
-                target=lambda d=did, c=ch: self._safe(
-                    lambda: self.client.servo_set(d, c, pwm)),
+                target=lambda d=did, c=ch: self._safe(lambda: self._dispatch_core(
+                    f"SERVO PRIME CH{int(c)}", lambda: self.client.servo_set(d, c, pwm),
+                    source="servo-prime", targets=[int(d)], enforce_dedup=False)),
                 daemon=True).start()
         self._refresh_servo_buttons()
 
@@ -3626,8 +3741,10 @@ class GroundStation(QMainWindow):
                 self._log(f"SERVO {label} พร้อมใช้งาน (เตรียมเสร็จใน {took:.1f} วินาที)",
                           vehicle=f"Drone {did}", category="STATUS", severity="SUCCESS")
                 threading.Thread(
-                    target=lambda d=did, c=ch: self._safe(
-                        lambda: self.client.servo_release(d, c)),
+                    target=lambda d=did, c=ch: self._safe(lambda: self._dispatch_core(
+                        f"SERVO RELEASE CH{int(c)} [prime]",
+                        lambda: self.client.servo_release(d, c),
+                        source="servo-prime", targets=[int(d)], enforce_dedup=False)),
                     daemon=True).start()
                 self._refresh_servo_buttons()
             elif now - started > self.SERVO_PRIME_TIMEOUT:
@@ -3640,8 +3757,10 @@ class GroundStation(QMainWindow):
                           f"แต่คำสั่งแรกอาจหน่วง",
                           vehicle=f"Drone {did}", category="STATUS", severity="WARNING")
                 threading.Thread(
-                    target=lambda d=did, c=ch: self._safe(
-                        lambda: self.client.servo_release(d, c)),
+                    target=lambda d=did, c=ch: self._safe(lambda: self._dispatch_core(
+                        f"SERVO RELEASE CH{int(c)} [prime]",
+                        lambda: self.client.servo_release(d, c),
+                        source="servo-prime", targets=[int(d)], enforce_dedup=False)),
                     daemon=True).start()
                 self._refresh_servo_buttons()
 
@@ -3752,10 +3871,13 @@ class GroundStation(QMainWindow):
         def work():
             for did in ids:
                 if off:
-                    r = self._safe(lambda d=did: self.client.servo_release(d, ch))
+                    r = self._safe(lambda d=did: self._dispatch_core(
+                        f"SERVO RELEASE CH{int(ch)}", lambda: self.client.servo_release(d, ch),
+                        source="cockpit-servo", targets=[int(d)], enforce_dedup=False))
                 else:
-                    r = self._safe(
-                        lambda d=did: self.client.servo_set(d, ch, on_pwm))
+                    r = self._safe(lambda d=did: self._dispatch_core(
+                        f"SERVO SET CH{int(ch)}", lambda: self.client.servo_set(d, ch, on_pwm),
+                        source="cockpit-servo", targets=[int(d)], enforce_dedup=False))
                 ok = bool(r is not None and getattr(r, "ok", False))
                 if ok:
                     # เวลาจริงจากกดถึง core รับคำสั่ง — ไว้ดูว่าถ้าหน่วง หน่วงที่ชั้นไหน
@@ -3967,17 +4089,32 @@ class GroundStation(QMainWindow):
                     f" border:1px solid {hairline()}; }}")
                 btn.setToolTip(f"SERVO {label} (CH{ch}) — กดแล้วสั่งทันที ไม่ถามยืนยัน · "
                                f"กดซ้ำ = ยกเลิกและคืนช่องให้รีโมท")
-    def _cmd_land(self):    self._run_cmd("LAND", lambda ids: self.client.land(ids))
+    def _cmd_land(self):
+        if bool(getattr(self, "_mission_core_authority", False)):
+            self._abort_waypoint_execution()
+        self._run_cmd("LAND", lambda ids: self.client.land(ids))
+
     def _cmd_rtl(self):
         """RTL — ลำเดียวสั่งตรง, หลายลำใช้ลำดับแยกชั้นความสูงกันชน (spec 2)"""
+        if bool(getattr(self, "_mission_core_authority", False)):
+            self._abort_waypoint_execution()
         ids = self._target_ids()
         if len(ids) <= 1:
             self._run_cmd("RTL", lambda i: self.client.rtl(i))
             return
         self._staggered_rtl(ids)
-    def _cmd_hold(self):    self._run_cmd("HOLD", lambda ids: self.client.hold(ids))
+    def _cmd_hold(self):
+        # HOLD while Core owns a mission is an explicit operator takeover, not a
+        # second navigation owner. Reuse Cancel Navigation so the Core run is
+        # cancelled and stale waypoint/WAIT callbacks are invalidated first.
+        if bool(getattr(self, "_mission_core_authority", False)):
+            self._cancel_navigation()
+            return
+        self._run_cmd("HOLD", lambda ids: self.client.hold(ids))
 
     def _cmd_takeoff(self):
+        if self._manual_nav_blocked_by_core("TAKEOFF"):
+            return
         if not self._preflight_gate("TAKEOFF"):
             return
         alt = self.sf_takeoff.value()
@@ -3988,19 +4125,26 @@ class GroundStation(QMainWindow):
                 ok_text="ยืนยันขึ้นบิน", accent=T("green"), danger=True):
             return
         self._run_cmd(f"TAKEOFF {alt:.0f}m",
-                      lambda target: self.client.takeoff(target, alt, confirmed=True))
+                      lambda target: self.client.takeoff(target, alt, confirmed=True),
+                      dedup_key=f"TAKEOFF|alt={alt!r}|confirmed=True")
 
     def _cmd_mode(self, enum_name):
+        if self._manual_nav_blocked_by_core("MODE"):
+            return
         mode = getattr(rpc.common_pb2, enum_name)
         self._run_cmd(f"MODE {enum_name.replace('FLIGHT_MODE_', '')}",
                       lambda ids: self.client.set_mode(ids, mode))
 
     def _cmd_goalt(self):
+        if bool(getattr(self, "_mission_core_authority", False)):
+            self._abort_waypoint_execution()
         alt = self.sf_setalt.value()
         self._run_cmd(f"GO ALT {alt:.0f}m", lambda ids: self.client.change_alt(ids, alt))
 
     def _swarm_start(self):
         if not self._guard():
+            return
+        if self._manual_nav_blocked_by_core("SWARM START"):
             return
         # เส้นทาง UI ปกติ: reject การเริ่ม Swarm ถ้า WAVE กำลัง execute (spec §10)
         if getattr(self, "_wave_executing", False):
@@ -4011,16 +4155,21 @@ class GroundStation(QMainWindow):
         sep = self.sf_spacing.value()
         formation = self.form_picker.current() if hasattr(self, "form_picker") else self._form_group.checkedId()
         fname = FORMATION_NAMES.get(formation, str(formation))
+        gateway_targets = list(self._selected_or_all() or self._connected_ids())
         self._log(f"FORM UP ({fname}, sep {sep:.0f}m)", category="COMMAND")
         self._show_toast("FORM UP · ส่งคำสั่ง…", "info")
 
         def worker():
             try:
-                cfg = self.client.swarm_config(sep, formation=formation)
+                cfg = self._dispatch_core(
+                    "SWARM CONFIG", lambda: self.client.swarm_config(sep, formation=formation),
+                    source="swarm", targets=gateway_targets)
                 if not cfg.ok:
                     self.cmd_result.emit(f"FORMATION: ok=False {cfg.message}")
                     return
-                r = self.client.swarm_start()
+                r = self._dispatch_core(
+                    "SWARM START", lambda: self.client.swarm_start(),
+                    source="swarm", targets=gateway_targets)
                 self.cmd_result.emit(f"SWARM: ok={r.ok} {r.message}")
             except Exception as e:
                 self.cmd_result.emit(f"SWARM: ERROR {e}")
@@ -4031,8 +4180,10 @@ class GroundStation(QMainWindow):
             return
         self._summ_event("ยกเลิก", "หยุดขบวน SWARM", cancelled=True)
         self._show_toast("SWARM STOP · ส่งคำสั่ง…", "info")
+        gateway_targets = list(self._selected_or_all() or self._connected_ids())
         threading.Thread(target=lambda: self._safe(
-            lambda: self.cmd_result.emit(f"SWARM STOP: ok={self.client.swarm_stop().ok}")),
+            lambda: self.cmd_result.emit(
+                f"SWARM STOP: ok={self._dispatch_core('SWARM STOP', lambda: self.client.swarm_stop(), source='swarm', targets=gateway_targets).ok}")),
             daemon=True).start()
 
     def _swarm_return(self):
@@ -4364,8 +4515,10 @@ class GroundStation(QMainWindow):
             self._summ_remove("head")
         if push and did:
             self._js(f"setLeaderId({did})")
-            threading.Thread(target=lambda: self._safe(
-                lambda: self.client.set_leader(did)), daemon=True).start()
+            threading.Thread(target=lambda: self._safe(lambda: self._dispatch_core(
+                "SET LEADER", lambda: self.client.set_leader(did),
+                source="head-selection", targets=[did], enforce_dedup=False)),
+                daemon=True).start()
 
     def _update_head_ui(self):
         for did, item in self.fleet_items.items():
@@ -4406,8 +4559,10 @@ class GroundStation(QMainWindow):
             self._head_id = 0
             self._update_head_ui()
             self._summ_remove("head")
-            threading.Thread(target=lambda: self._safe(
-                lambda: self.client.set_leader(0)), daemon=True).start()  # ปลดหมุดที่ core
+            threading.Thread(target=lambda: self._safe(lambda: self._dispatch_core(
+                "SET LEADER AUTO", lambda: self.client.set_leader(0),
+                source="head-selection", targets=(), enforce_dedup=False)),
+                daemon=True).start()  # ปลดหมุดที่ core
             self._head_watchdog()   # ให้เลือกหัวอัตโนมัติทันที
             return
         try:
@@ -4461,6 +4616,8 @@ class GroundStation(QMainWindow):
     def _on_panel_takeoff(self, mode):
         """กดปุ่ม TAKE OFF ในแผง (spec 2) — สั่งเฉพาะลำที่เลือกไว้ ตามโหมด"""
         if not self._guard():
+            return
+        if self._manual_nav_blocked_by_core("TAKEOFF"):
             return
         ids = self._selected_or_all()
         if not ids:
@@ -4523,7 +4680,12 @@ class GroundStation(QMainWindow):
 
         def worker():
             try:
-                r = self.client.takeoff([int(did)], float(alt), confirmed=True)
+                r = self._dispatch_core(
+                    f"TAKEOFF {float(alt):.17g}m [orchestrator]",
+                    lambda: self.client.takeoff([int(did)], float(alt), confirmed=True),
+                    source="takeoff-orchestrator", targets=[int(did)],
+                    dedup_key=f"TAKEOFF|alt={float(alt)!r}|confirmed=True",
+                    enforce_dedup=False)
                 ok = bool(getattr(r, "ok", True))
                 msg = getattr(r, "message", "") or ""
                 tag = "HEAD " if is_head else ""
@@ -4589,6 +4751,8 @@ class GroundStation(QMainWindow):
         → ไม่มีลำไหนขึ้นบิน. ลำดับที่ถูกคือ ขึ้นบินก่อน → รอลอยตัว → ค่อยจัดขบวน
         """
         if not self._guard():
+            return
+        if self._manual_nav_blocked_by_core("SWARM TAKEOFF"):
             return
         ids = self._selected_or_all() or sorted(self.fleet_items.keys())
         if not ids:
@@ -4673,15 +4837,24 @@ class GroundStation(QMainWindow):
         QTimer.singleShot(2000, check)
 
     def _do_formup(self, sep, formation, run_id=None):
+        targets = list(self._selected_or_all() or self._connected_ids())
+
         def worker():
             try:
-                cfg = self.client.swarm_config(sep, formation=formation)
+                cfg = self._dispatch_core(
+                    "SWARM CONFIG [form-up]",
+                    lambda: self.client.swarm_config(sep, formation=formation),
+                    source="swarm-orchestrator", targets=targets,
+                    enforce_dedup=False)
                 if not getattr(cfg, "ok", True):
                     self.cmd_result.emit(f"FORMATION: ok=False {cfg.message}")
                     if run_id is not None:
                         self.ui_call.emit(lambda r=run_id, m=cfg.message: self._flight_step_failed(r, "form_up", m))
                     return
-                r = self.client.swarm_start()
+                r = self._dispatch_core(
+                    "SWARM START [form-up]", lambda: self.client.swarm_start(),
+                    source="swarm-orchestrator", targets=targets,
+                    enforce_dedup=False)
                 self.cmd_result.emit(f"SWARM FORM UP: ok={r.ok} {r.message}")
                 if run_id is not None:
                     if getattr(r, "ok", True):
@@ -4713,6 +4886,8 @@ class GroundStation(QMainWindow):
         """
         if not self._guard():
             return
+        if bool(getattr(self, "_mission_core_authority", False)):
+            self._abort_waypoint_execution()
         if self._rtl_active:
             self._show_toast("RTL กำลังทำงานอยู่", "info")
             return
@@ -4733,8 +4908,11 @@ class GroundStation(QMainWindow):
 
         def worker():
             try:
-                result = self.client.swarm_return(
-                    ids, base_alt=self.RTL_BASE_ALT, gap=self.RTL_LAYER_GAP)
+                result = self._dispatch_core(
+                    "SWARM RETURN", lambda: self.client.swarm_return(
+                        ids, base_alt=self.RTL_BASE_ALT, gap=self.RTL_LAYER_GAP),
+                    source="rtl-orchestrator", targets=ids,
+                    enforce_dedup=False)
                 self.cmd_result.emit(
                     f"RETURN + LAND {len(ids)} ลำ: ok={getattr(result, 'ok', False)} "
                     f"{getattr(result, 'message', '')}")
@@ -4837,7 +5015,8 @@ class GroundStation(QMainWindow):
         if (not self._waypoint_executing and not self._wave_executing
                 and not self._wp_takeoff_pending):
             return
-        mission_shadow.cancel(self)  # F4-A2 shadow only; never sends a flight command
+        mission_shadow.cancel(self)
+        self._mission_core_authority = False
         self._wp_takeoff_generation += 1
         self._wp_takeoff_pending = False
         self._wp_wait_invalidate()   # WAIT ค้างอยู่ต้องถูกยกเลิก — no stale callback
@@ -4919,7 +5098,11 @@ class GroundStation(QMainWindow):
 
         def worker():
             try:
-                r = self.client.stop_all([int(i) for i in ids])
+                estop_ids = [int(i) for i in ids]
+                r = self._dispatch_core(
+                    "E-STOP", lambda: self.client.stop_all(estop_ids),
+                    source="emergency", targets=estop_ids,
+                    enforce_dedup=False)
                 self.cmd_result.emit(f"EMERGENCY STOP {label}: ok={getattr(r, 'ok', True)}")
             except Exception as e:
                 self.cmd_result.emit(f"EMERGENCY STOP {label}: ERROR {e}")
@@ -5091,15 +5274,23 @@ class GroundStation(QMainWindow):
 
         def worker():
             try:
-                r = fn()
-                self.cmd_result.emit(
-                    f"{label}: ok={getattr(r, 'ok', True)} {getattr(r, 'message', '')}".strip())
+                # V3-S07: pass-through gateway boundary (card/quick-action source).
+                r = self._gateway.dispatch(
+                    label, fn, source="card", targets=[int(drone_id)])
+                if getattr(r, "in_progress", False):
+                    self.cmd_result.emit(
+                        f"{label}: in_progress {getattr(r, 'message', '') or ''}".strip())
+                else:
+                    self.cmd_result.emit(
+                        f"{label}: ok={getattr(r, 'ok', True)} {getattr(r, 'message', '')}".strip())
             except Exception as e:
                 self.cmd_result.emit(f"{label}: ERROR {e}")
         threading.Thread(target=worker, daemon=True).start()
 
     def _card_arm(self, drone_id):
         """Quick action ARM รายลำ (spec 3)"""
+        if self._manual_nav_blocked_by_core("ARM"):
+            return
         self._card_cmd("ARM", drone_id, lambda: self.client.arm([drone_id]))
 
     def _card_disarm(self, drone_id):
@@ -5113,13 +5304,29 @@ class GroundStation(QMainWindow):
                 f"ถ้าโดรนกำลังลอยอยู่ จะตกทันที",
                 ok_text="DISARM", danger=True):
             return
+        self._card_core_takeover_if_owned(did)
         self._card_cmd("DISARM", did,
                        lambda: self.client.disarm([did], confirmed=True))
 
+    def _card_core_takeover_if_owned(self, drone_id):
+        did = int(drone_id or 0)
+        if not bool(getattr(self, "_mission_core_authority", False)):
+            return
+        participants = {int(d) for d in getattr(self, "_wp_target_ids", [])}
+        if participants and did not in participants:
+            return
+        self._abort_waypoint_execution()
+
+    def _card_hold(self, drone_id):
+        self._card_core_takeover_if_owned(drone_id)
+        self._card_cmd("HOLD", drone_id, lambda: self.client.hold([drone_id]))
+
     def _card_rtl(self, drone_id):
+        self._card_core_takeover_if_owned(drone_id)
         self._card_cmd("RTL", drone_id, lambda: self.client.rtl([drone_id]))
 
     def _card_land(self, drone_id):
+        self._card_core_takeover_if_owned(drone_id)
         self._card_cmd("LAND", drone_id, lambda: self.client.land([drone_id]))
 
     @staticmethod
@@ -5603,6 +5810,9 @@ class GroundStation(QMainWindow):
         # ปลดออกจากสถานะ online → auto-reassign head + connected-detection เห็นว่าหลุด
         self._last_seen.pop(did, None)
         self._last_telem.pop(did, None)
+        self._telemetry_store.forget(did)
+        self._telemetry_render_gate.forget(did)
+        self._health.forget_drone(did)
         item = self.fleet_items.get(did)
         if item is not None:
             item.badge.setText("OFFLINE")
@@ -5696,6 +5906,9 @@ class GroundStation(QMainWindow):
             item.deleteLater()
         self._last_telem.pop(drone_id, None)
         self._last_seen.pop(drone_id, None)
+        self._telemetry_store.forget(drone_id)
+        self._telemetry_render_gate.forget(drone_id)
+        self._health.forget_drone(drone_id)
         self._reserved_ids.discard(drone_id)
         self._servo_state.pop(drone_id, None)
         # ลบออกจากฝูงแล้วต้องล้างสถานะอุ่นเครื่องด้วย — ต่อกลับมาใหม่ FC เริ่มนับใหม่
@@ -5777,6 +5990,8 @@ class GroundStation(QMainWindow):
     def _leader_mode(self, mode_name):
         if not self._guard():
             return
+        if self._manual_nav_blocked_by_core("LEADER MODE"):
+            return
         ids = self._rc_target()
         mode = getattr(rpc.common_pb2, "FLIGHT_MODE_" + mode_name)
         label = "UI/GUIDED" if mode_name == "GUIDED" else "RC/LOITER"
@@ -5785,7 +6000,10 @@ class GroundStation(QMainWindow):
 
         def worker():
             try:
-                r = self.client.set_mode(ids, mode)
+                r = self._dispatch_core(
+                    f"MODE {mode_name} [leader]", lambda: self.client.set_mode(ids, mode),
+                    source="leader-control", targets=ids,
+                    enforce_dedup=False)
                 self.cmd_result.emit(f"{label}: ok={getattr(r, 'ok', True)}")
             except Exception as e:
                 self.cmd_result.emit(f"{label}: ERROR {e}")
@@ -5935,6 +6153,8 @@ class GroundStation(QMainWindow):
     def _rc_press(self, direction):
         if not self._guard():
             return
+        if self._manual_nav_blocked_by_core("MOVE"):
+            return
         self._rc_dir = direction
         # เลือกหลายลำ + ทิศแนวราบ → คำนวณคิวกันชน แล้ว log ให้เห็นครั้งเดียวต่อการกด
         if self._multi_move():
@@ -5969,7 +6189,10 @@ class GroundStation(QMainWindow):
 
         def worker():
             try:
-                r = self.client.stop_all(ids)
+                r = self._dispatch_core(
+                    "STOP ALL [rc]", lambda: self.client.stop_all(ids),
+                    source="rc", targets=ids,
+                    enforce_dedup=False)
                 if notify:
                     self.cmd_result.emit(f"STOP: ok={getattr(r, 'ok', True)}")
             except Exception as e:
@@ -5979,6 +6202,14 @@ class GroundStation(QMainWindow):
     def _rc_tick(self):
         if self._rc_dir is None:
             return
+        if bool(getattr(self, "_mission_core_authority", False)):
+            # A press may have started before Core authority was acquired. Stop
+            # the local repeat timer/state without emitting a competing stop/move.
+            self._rc_dir = None
+            self._rc_order_dir = None
+            if self._rc_timer.isActive():
+                self._rc_timer.stop()
+            return
         spd = self.sf_speed.value()
         d = self._rc_dir
         if self._multi_move() and self._dir_name(d):
@@ -5987,11 +6218,15 @@ class GroundStation(QMainWindow):
             for i, did in enumerate(order):
                 delay = i * 120  # หน่วงเล็กน้อยให้ตัวหน้าเคลียร์ทางก่อน
                 QTimer.singleShot(delay, lambda x=did: threading.Thread(
-                    target=lambda: self._safe(lambda: self.client.rc_move([x], d, spd)),
+                    target=lambda: self._safe(lambda: self._dispatch_core(
+                        "RC MOVE [repeat]", lambda: self.client.rc_move([x], d, spd),
+                        source="rc-repeat", targets=[x], enforce_dedup=False)),
                     daemon=True).start())
         else:
             ids = self._rc_target()
-            threading.Thread(target=lambda: self._safe(lambda: self.client.rc_move(ids, d, spd)),
+            threading.Thread(target=lambda: self._safe(lambda: self._dispatch_core(
+                "RC MOVE [repeat]", lambda: self.client.rc_move(ids, d, spd),
+                source="rc-repeat", targets=ids, enforce_dedup=False)),
                              daemon=True).start()
 
     # ══════════════════════════════════════════════════════════
@@ -6029,8 +6264,10 @@ class GroundStation(QMainWindow):
                     self._head_push_ts = time.monotonic()
                     self._log(f"core leader={leader} ไม่ตรงกับ Head ที่เลือก ({pinned}) "
                               f"— ส่ง SetLeader ซ้ำ", category="STATUS")
-                    threading.Thread(target=lambda p=pinned: self._safe(
-                        lambda: self.client.set_leader(p)), daemon=True).start()
+                    threading.Thread(target=lambda p=pinned: self._safe(lambda: self._dispatch_core(
+                        "SET LEADER [resync]", lambda: self.client.set_leader(p),
+                        source="swarm-resync", targets=[int(p)], enforce_dedup=False)),
+                        daemon=True).start()
             else:
                 # ไม่ได้ปักหมุด (หรือลำที่ปักหลุดไปแล้ว) → ตาม core (เช่น failover)
                 self._apply_head(leader, push=False, reason="swarm")
@@ -6180,7 +6417,10 @@ class GroundStation(QMainWindow):
     def _fence_send(self, points, pts_json):
         """อัปเดตภาพรั้วหลัง core ยืนยันเท่านั้น กัน UI แสดง fence ที่ไม่ได้ enforce."""
         try:
-            result = self.client.set_geofence(points)
+            result = self._dispatch_core(
+                "SET GEOFENCE", lambda: self.client.set_geofence(points),
+                source="geofence", targets=(),
+                enforce_dedup=False)
             self.cmd_result.emit(f"GEOFENCE: {result.message}")
             if not bool(getattr(result, "ok", False)):
                 self.ui_call.emit(lambda: self._show_toast(
@@ -6311,6 +6551,8 @@ class GroundStation(QMainWindow):
             return
         if not self._guard():
             return
+        if self._manual_nav_blocked_by_core("GOTO(click)"):
+            return
         # ใช้ชุดที่เลือกจริงเท่านั้น (ไม่ fallback ไปลำแรก) — คลิกแผนที่คือคำสั่งให้บิน
         # ถ้าไม่ได้เลือกไว้แล้วเผลอคลิก ไม่ควรมีโดรนลำไหนออกบินเอง
         ids = self._selected_or_all()
@@ -6358,6 +6600,11 @@ class GroundStation(QMainWindow):
         if not self._nav_targets:
             self._summ_remove("goto")
 
+        # เมื่อ Go Core ถือ authority, browser target_reached เป็น presentation
+        # signal เท่านั้น ห้ามขยับ Python index/WAIT/action หรือยิง GOTO ต่อ.
+        if bool(getattr(self, "_mission_core_authority", False)):
+            return
+
         # กำลัง Execute เส้นทาง Waypoint อยู่
         if self._waypoint_executing and did:
             if self._wp_separate:
@@ -6376,8 +6623,12 @@ class GroundStation(QMainWindow):
                 self._wp_on_arrived(did, wp, [did], go_next)
             else:
                 # GROUPED — ต้องรอครบทุกลำก่อนไปจุดถัดไป (กันตัดขบวน)
-                self._wp_arrived.add(did)
-                if self._wp_arrived >= set(self._wp_target_ids):
+                arrived, complete, accepted = waypoint_logic.grouped_arrival_update(
+                    self._wp_arrived, self._wp_target_ids, did)
+                if not accepted:
+                    return
+                self._wp_arrived = arrived
+                if complete:
                     route = self._waypoint_route
                     if route is None or self._wp_current_index >= len(route):
                         return
@@ -6425,21 +6676,40 @@ class GroundStation(QMainWindow):
             # (การหยุดลอยสำคัญกว่าการหยุดขบวน — พลาดแล้วโดรนไหลต่อ)
             if was_swarm:
                 try:
-                    self.client.swarm_stop()
+                    self._dispatch_core(
+                        "SWARM STOP [cancel-nav]", lambda: self.client.swarm_stop(),
+                        source="cancel-nav", targets=ids, enforce_dedup=False)
                 except Exception as e:
                     self.cmd_result.emit(f"CANCEL NAV: swarm stop ล้มเหลว ({e}) — สั่ง HOLD ต่อ")
             try:
-                self.client.stop_all([int(i) for i in ids])  # หยุดเคลื่อนที่ทันที
-                r = self.client.hold([int(i) for i in ids])  # ค้างตำแหน่ง (GUIDED)
+                nav_ids = [int(i) for i in ids]
+                self._dispatch_core(
+                    "STOP ALL [cancel-nav]", lambda: self.client.stop_all(nav_ids),
+                    source="cancel-nav", targets=nav_ids, enforce_dedup=False)
+                r = self._dispatch_core(
+                    "HOLD [cancel-nav]", lambda: self.client.hold(nav_ids),
+                    source="cancel-nav", targets=nav_ids, enforce_dedup=False)
                 self.cmd_result.emit(f"CANCEL NAV: ok={getattr(r, 'ok', True)}")
             except Exception as e:
                 self.cmd_result.emit(f"CANCEL NAV: ERROR {e}")
         threading.Thread(target=worker, daemon=True).start()
 
     def _goto_one(self, did, lat, lon, alt):
+        # Defense against a stale QTimer/manual click queued before Core took
+        # authority. Legacy waypoint execution only reaches here while the Core
+        # flag is false, so failing closed here cannot suppress a valid legacy run.
+        if bool(getattr(self, "_mission_core_authority", False)):
+            self._log(f"GOTO D{int(did)} ถูกทิ้ง — Core mission ถือ flight authority",
+                      severity="WARNING", category="ALERT")
+            return
         def worker():
             try:
-                r = self.client.goto(int(did), float(lat), float(lon), float(alt))
+                target_id = int(did)
+                r = self._dispatch_core(
+                    "GOTO [legacy]", lambda: self.client.goto(
+                        target_id, float(lat), float(lon), float(alt)),
+                    source="legacy-goto", targets=[target_id],
+                    enforce_dedup=False)
                 self.cmd_result.emit(
                     f"GOTO D{did}: ok={getattr(r, 'ok', True)} "
                     f"{getattr(r, 'message', '')}".strip())
@@ -6448,22 +6718,8 @@ class GroundStation(QMainWindow):
         threading.Thread(target=worker, daemon=True).start()
 
     def _goto_order(self, ids, latlon, tlat, tlon):
-        """เรียงลำดับส่งคำสั่ง goto ให้ลำที่อยู่ "ด้านหน้า" ของทิศเดินทางไปก่อน (กันชน)"""
-        if len(ids) <= 1 or not latlon:
-            return list(ids)
-        clat = sum(p[0] for p in latlon.values()) / len(latlon)
-        clon = sum(p[1] for p in latlon.values()) / len(latlon)
-        dlat, dlon = tlat - clat, tlon - clon
-        if abs(dlat) < 1e-9 and abs(dlon) < 1e-9:
-            return list(ids)
-        # ทิศหลักของการเดินทาง → ใช้ movement_order เดิม (x=lon, y=lat)
-        if abs(dlon) >= abs(dlat):
-            dname = swarm_logic.DIR_RIGHT if dlon > 0 else swarm_logic.DIR_LEFT
-        else:
-            dname = swarm_logic.DIR_FWD if dlat > 0 else swarm_logic.DIR_BWD
-        xy = {d: (p[1], p[0]) for d, p in latlon.items()}   # (lat,lon) → (x=lon,y=lat)
-        order = swarm_logic.movement_order(xy, dname)
-        return order + [d for d in ids if d not in order]
+        """เรียงลำดับส่ง GOTO ด้วย production helper ที่ทดสอบแบบ headless ได้"""
+        return waypoint_logic.grouped_goto_order(ids, latlon, tlat, tlon)
 
     # ══════════════════════════════════════════════════════════
     #  WAYPOINT ROUTE PLANNING
@@ -6761,6 +7017,168 @@ class GroundStation(QMainWindow):
                   category="COMMAND")
         self._wp_render_points_label()
 
+    def _apply_mission_core_state(self, state, rebuild=False):
+        """Apply GetMissionState as presentation cache; never emit flight commands."""
+        if state is None:
+            return
+        run_id = int(getattr(state, "run_id", 0) or 0)
+        active = bool(getattr(state, "active", False))
+        authority = bool(getattr(state, "authority_active", False))
+        recovery = bool(getattr(state, "recovery_required", False))
+        self._mission_recovery_required = recovery
+        same_run = (run_id > 0 and run_id == int(getattr(self, "_mission_shadow_run_id", 0) or 0))
+
+        if (not active or not authority) and not recovery:
+            # A terminal snapshot for the bound run is authoritative: stop all
+            # Python mission progression caches, but do not issue HOLD/GOTO.
+            if same_run or bool(getattr(self, "_mission_core_authority", False)):
+                self._mission_core_state = state
+                self._mission_core_authority = False
+                self._waypoint_executing = False
+                self._wp_waits = {}
+                if hasattr(self, "_wp_wait_timer"):
+                    self._wp_wait_timer.stop()
+                reason = str(getattr(state, "terminal_reason", "") or "").strip()
+                self._wp_render_status(reason or "Core mission ended")
+                self._refresh_flight_mode()
+            return
+
+        plan = getattr(state, "plan", None)
+        participants = [int(x) for x in getattr(state, "participants", [])]
+        plan_id = str(getattr(state, "plan_id", "") or "")
+        identity_changed = (
+            run_id != int(getattr(self, "_mission_shadow_run_id", 0) or 0)
+            or plan_id != str(getattr(self, "_mission_shadow_operation_id", "") or ""))
+
+        self._mission_core_authority = not recovery
+        self._mission_core_state = state
+        self._mission_shadow_run_id = run_id
+        self._mission_shadow_operation_id = str(
+            getattr(state, "operation_id", "") or plan_id)
+        self._mission_shadow_cancel_pending = False
+        self._waypoint_executing = not recovery
+        mode = int(getattr(state, "mode", rpc.mission_pb2.MISSION_MODE_GROUPED))
+        self._wp_separate = (mode == int(rpc.mission_pb2.MISSION_MODE_SEPARATE))
+        active_participants = [
+            int(x) for x in getattr(state, "active_participants", [])]
+        excluded_participants = [
+            int(x) for x in getattr(state, "excluded_participants", [])]
+        if (mode == int(rpc.mission_pb2.MISSION_MODE_SWARM_LEADER)
+                and active_participants):
+            self._wp_target_ids = active_participants
+        else:
+            self._wp_target_ids = participants
+        self._wp_current_index = max(0, int(getattr(state, "current_index", 0) or 0))
+        self._wp_sep_index = {
+            int(drone_id): max(0, int(index))
+            for drone_id, index in dict(getattr(state, "sep_index", {})).items()
+        }
+        self._wp_arrived = {int(x) for x in getattr(state, "arrived", [])}
+        original_leader_id = (
+            int(getattr(plan, "leader_id", 0) or 0) if plan is not None else 0)
+        leader_id = int(
+            getattr(state, "current_leader_id", 0) or original_leader_id)
+        if mode == int(rpc.mission_pb2.MISSION_MODE_SWARM_LEADER):
+            self._head_id = leader_id
+            self._leader_id = leader_id
+            managed = active_participants or participants
+            self._mission_core_ownership = {
+                "leader": leader_id,
+                "mission_owned": [leader_id] if leader_id else [],
+                "swarm_owned": [d for d in managed if d != leader_id],
+                "excluded": list(excluded_participants),
+            }
+        elif self._wp_separate:
+            self._mission_core_ownership = {
+                "mission_owned": list(participants), "swarm_owned": []}
+        else:
+            self._mission_core_ownership = {
+                "mission_owned": list(participants), "swarm_owned": []}
+        # Legacy WAIT callbacks are never allowed to drive a Core-owned run.
+        self._wp_waits = {}
+        if hasattr(self, "_wp_wait_timer"):
+            self._wp_wait_timer.stop()
+
+        routes = list(getattr(plan, "routes", [])) if plan is not None else []
+
+        def rebuild_route(proto_route, route_ids):
+            rebuilt = waypoint_logic.WaypointRoute(route_ids)
+            rebuilt.points = []
+            for i, point in enumerate(getattr(proto_route, "points", [])):
+                action = ""
+                if int(getattr(point, "action", 0)) == int(
+                        rpc.mission_pb2.MISSION_WP_ACTION_SERVO_A):
+                    action = "servo_a"
+                elif int(getattr(point, "action", 0)) == int(
+                        rpc.mission_pb2.MISSION_WP_ACTION_SERVO_B):
+                    action = "servo_b"
+                rebuilt.points.append(waypoint_logic.Waypoint(
+                    int(getattr(point, "seq", i)), float(point.lat), float(point.lon),
+                    action, int(getattr(point, "wait_seconds", 0) or 0)))
+            rebuilt._next_index = max(
+                [wp.index for wp in rebuilt.points], default=-1) + 1
+            return rebuilt
+
+        needs_rebuild = rebuild or identity_changed or (
+            self._waypoint_route is None and not self._wp_routes)
+        if routes and needs_rebuild:
+            self._js("clearAllWaypoints()")
+            if self._wp_separate:
+                self._waypoint_route = None
+                self._wp_routes = {}
+                for proto_route in routes:
+                    drone_id = int(getattr(proto_route, "drone_id", 0) or 0)
+                    if drone_id <= 0:
+                        continue
+                    route = rebuild_route(proto_route, [drone_id])
+                    self._wp_routes[drone_id] = route
+                    self._wp_sep_index.setdefault(drone_id, 0)
+                    for wp in route.points:
+                        self._js(
+                            f"addWaypoint({drone_id}, {wp.lat:.7f}, {wp.lon:.7f}, "
+                            f"{drone_color(drone_id)!r}, {wp.index})")
+                self._wp_key = 0
+            else:
+                route = rebuild_route(routes[0], participants)
+                self._waypoint_route = route
+                self._wp_routes = {}
+                self._wp_key = participants[0] if len(participants) == 1 else 0
+                color = (drone_color(participants[0])
+                         if len(participants) == 1 else T("cyan"))
+                for wp in route.points:
+                    self._js(
+                        f"addWaypoint({self._wp_key}, {wp.lat:.7f}, {wp.lon:.7f}, "
+                        f"{color!r}, {wp.index})")
+            self._wp_render_points_label()
+            if mode == int(rpc.mission_pb2.MISSION_MODE_SWARM_LEADER):
+                managed = active_participants or participants
+                followers = [d for d in managed if d != leader_id]
+                detail = (f"Leader D{leader_id}=Mission · "
+                          f"Followers {followers}=Swarm · "
+                          f"Excluded {excluded_participants}=Operator")
+            elif self._wp_separate:
+                detail = "SEPARATE per-drone routes"
+            else:
+                detail = f"WP {self._wp_current_index + 1}"
+            if recovery:
+                self._log(
+                    f"CORE RECOVERY REQUIRED · previous run {run_id} · {detail}",
+                    category="STATUS", severity="WARNING")
+            else:
+                self._log(
+                    f"Cockpit rebound to Core mission run {run_id} · {detail}",
+                    category="STATUS", severity="SUCCESS")
+        elif not recovery:
+            self._wp_render_status()
+        if recovery:
+            reason = str(getattr(state, "recovery_reason", "") or
+                         getattr(state, "terminal_reason", "") or
+                         "Core restarted with an unfinished mission")
+            self._wp_render_status(f"CORE RECOVERY REQUIRED · {reason}")
+        # Presentation recovery is deliberately command-free: it never calls
+        # _goto_one, HOLD, servo, swarm_start, or any navigation RPC.
+        self._refresh_flight_mode()
+
     def _wp_render_points_label(self):
         if self._wp_separate:
             routes = {d: r for d, r in self._wp_routes.items() if not r.is_empty()}
@@ -6798,6 +7216,21 @@ class GroundStation(QMainWindow):
     def _wp_render_status(self, msg=None):
         if msg is not None:
             self.lbl_wp_status.setText(msg)
+            return
+        if bool(getattr(self, "_mission_core_authority", False)):
+            state = getattr(self, "_mission_core_state", None)
+            total = len(self._waypoint_route) if self._waypoint_route else 0
+            idx = max(0, int(getattr(state, "current_index", self._wp_current_index) or 0))
+            waits = list(getattr(state, "waits", [])) if state is not None else []
+            if waits:
+                rem = max(float(getattr(w, "remaining_s", 0.0) or 0.0) for w in waits)
+                mm, ss = divmod(int(rem + 0.999), 60)
+                self.lbl_wp_status.setText(
+                    f"CORE WAITING · จุดที่ {idx + 1}/{total} · {mm:02d}:{ss:02d} remaining")
+            else:
+                self.lbl_wp_status.setText(
+                    f"CORE EXECUTE · จุดที่ {min(idx + 1, total)}/{total}" if total
+                    else "CORE EXECUTE · กำลังโหลดแผนภารกิจ")
             return
         if self._wave_executing and self._wave_groups:
             group = self._wave_groups[self._wave_group_index]
@@ -6984,7 +7417,11 @@ class GroundStation(QMainWindow):
             for did in ids:
                 threading.Thread(
                     target=lambda d=did: self._safe(
-                        lambda: self.client.servo_release(d, channel)), daemon=True).start()
+                        lambda: self._dispatch_core(
+                            f"SERVO RELEASE CH{int(channel)} [waypoint]",
+                            lambda: self.client.servo_release(d, channel),
+                            source="waypoint-action", targets=[int(d)],
+                            enforce_dedup=False)), daemon=True).start()
             if (self._waypoint_executing
                     and (not self._wave_executing or generation == self._wave_generation)):
                 if (released and self._flight_is_current(run_id)
@@ -7013,7 +7450,10 @@ class GroundStation(QMainWindow):
                 if (not self._waypoint_executing
                         or (self._wave_executing and generation != self._wave_generation)):
                     return
-                hold_result = self.client.hold(ids)
+                hold_result = self._dispatch_core(
+                    "HOLD [waypoint-action]", lambda: self.client.hold(ids),
+                    source="waypoint-action", targets=ids,
+                    enforce_dedup=False)
                 if not bool(getattr(hold_result, "ok", False)):
                     raise RuntimeError(
                         "HOLD rejected: %s" % getattr(hold_result, "message", "unknown error"))
@@ -7021,7 +7461,11 @@ class GroundStation(QMainWindow):
                         or (self._wave_executing and generation != self._wave_generation)):
                     return
                 for did in ids:
-                    servo_result = self.client.servo_set(did, channel, pwm)
+                    servo_result = self._dispatch_core(
+                        f"SERVO SET CH{int(channel)} [waypoint]",
+                        lambda d=did: self.client.servo_set(d, channel, pwm),
+                        source="waypoint-action", targets=[int(did)],
+                        enforce_dedup=False)
                     if not bool(getattr(servo_result, "ok", False)):
                         raise RuntimeError(
                             "SERVO D%d rejected: %s" % (
@@ -7171,6 +7615,17 @@ class GroundStation(QMainWindow):
 
     def _wave_execute(self, auto=False):
         self._wave_auto = bool(auto)
+        # WAVE is intentionally legacy Python-owned until its Go authority
+        # semantics are migrated. Under a configured Core-authority token, every
+        # entrypoint (cockpit or Field Tablet) must first prove the Core mission
+        # slot is idle so the two executors can never overlap.
+        if not mission_shadow.legacy_ownership_allowed(self):
+            self._wave_auto = False
+            self._log("WAVE EXECUTE ถูกบล็อก — Core mission slot ไม่ยืนยันว่าว่าง",
+                      category="COMMAND", severity="ERROR")
+            self._show_toast("ไม่เริ่ม WAVE · Core mission ยัง active/ไม่ทราบสถานะ", "err")
+            self._wp_render_status("WAVE blocked · Core mission slot not idle")
+            return False
         route = self._waypoint_route
         groups = self._wave_selected_groups()
         if self._wp_separate:
@@ -7231,6 +7686,17 @@ class GroundStation(QMainWindow):
 
     def _wave_start_next_group(self):
         if not self._wave_executing:
+            return
+        # Re-check before every *subsequent* group.  Another authorized client
+        # could have started a Core-owned mission while this WAVE was waiting for
+        # the previous group to land.  Local abort invalidates callbacks/return
+        # bookkeeping without sending a competing flight command.
+        if (self._wave_group_index >= 0
+                and not mission_shadow.legacy_ownership_allowed(self)):
+            self._wave_abort("Core mission slot changed — WAVE stopped", clear_route=True)
+            self._show_banner(
+                "WAVE STOPPED — Core mission active/unknown; next group was not started",
+                T("red"))
             return
         if (self._wave_group_index >= 0 and self._flight_run
                 and self._flight_run.kind == "wave"):
@@ -7414,6 +7880,18 @@ class GroundStation(QMainWindow):
                 cancelled=True)
             return
 
+        # Under a configured Core-authority token, prove the Core mission slot
+        # is idle *before* auto-TAKEOFF or any other mission-side flight prep.
+        # _wp_begin_execute checks again before legacy GOTO to close the later
+        # handoff window; eligible Core plans still perform authoritative Start
+        # only after airborne readiness is confirmed.
+        if not mission_shadow.authority_slot_idle(self):
+            self._log("Waypoint EXECUTE ถูกบล็อกก่อน TAKEOFF — Core mission slot ไม่ยืนยันว่าว่าง",
+                      category="COMMAND", severity="ERROR")
+            self._show_toast("ไม่เริ่ม Waypoint · Core mission ยัง active/ไม่ทราบสถานะ", "err")
+            self._wp_render_status("Blocked before TAKEOFF · Core mission slot not idle")
+            return
+
         context = ("Waypoint SEPARATE" if self._wp_separate
                    else "Waypoint GROUPED")
         has_actions = bool(self._wp_action_points(routes))
@@ -7444,7 +7922,40 @@ class GroundStation(QMainWindow):
             self._flight_step_active(flow_run_id, "fly_waypoint", "WP 1/%d" % (
                 len(self._waypoint_route) if self._waypoint_route else 0))
 
-        mission_shadow.start(self, routes, ids, swarm_head, flow_run_id)
+        core_expected = mission_shadow.authority_eligible(
+            self, routes, ids, swarm_head)
+        core_authority = mission_shadow.start(
+            self, routes, ids, swarm_head, flow_run_id)
+        legacy_blocked = bool(getattr(self, "_mission_legacy_ownership_blocked", False))
+        if legacy_blocked:
+            # The plan itself belongs to the legacy executor, but Core could not
+            # prove the authority slot is idle (or reports an active Core run).
+            # Never overlap two mission owners.
+            self._mission_core_authority = False
+            self._waypoint_executing = False
+            if self._flight_run and self._flight_run.kind == "waypoint":
+                self._flight_run_cancel("Core mission slot is not confirmed idle")
+            self._log("Waypoint EXECUTE ถูกบล็อก — ยังยืนยันไม่ได้ว่า Core ไม่มี mission ค้าง",
+                      category="COMMAND", severity="ERROR")
+            self._show_toast("ไม่เริ่ม Waypoint · Core mission slot ยังไม่ว่าง", "err")
+            self._wp_render_status("Core mission slot ยังไม่ว่าง")
+            self._refresh_flight_mode()
+            return
+        if core_expected and not core_authority:
+            # Fail closed only for a plan that belongs to the enabled Core scope:
+            # the Start reply may be ambiguous and Core may already own it.
+            # Plans outside that scope never call authoritative StartMission and
+            # deliberately retain the proven legacy Python executor.
+            self._mission_core_authority = False
+            self._waypoint_executing = False
+            if self._flight_run and self._flight_run.kind == "waypoint":
+                self._flight_run_cancel("Core waypoint authority not confirmed")
+            self._log("Waypoint EXECUTE ถูกบล็อก — Core authority ไม่ยืนยัน (no fallback GOTO)",
+                      category="COMMAND", severity="ERROR")
+            self._show_toast("ไม่เริ่ม Waypoint · Core authority ไม่ยืนยัน", "err")
+            self._wp_render_status("Core authority ไม่ยืนยัน")
+            self._refresh_flight_mode()
+            return
 
         if self._wp_separate:
             total = sum(len(r) for r in routes.values())
@@ -7467,7 +7978,11 @@ class GroundStation(QMainWindow):
                     f"เริ่มบินตามเส้นทาง · {n} จุด · นำโดย Drone {swarm_head}", "info")
             else:
                 self._show_toast(f"เริ่มบินตามเส้นทาง · {n} จุด", "info")
-            self._wp_advance()
+            if not core_authority:
+                self._wp_advance()
+            else:
+                self._log("Waypoint authority = Go Core · Python GOTO disabled",
+                          category="COMMAND")
         self._wp_render_status()
 
     # ── SEPARATE: แต่ละลำเดินเส้นทางของตัวเองอิสระ ──
@@ -7506,6 +8021,8 @@ class GroundStation(QMainWindow):
         """สั่งบินไปยัง waypoint จุดถัดไป (เรียกซ้ำจนครบทุกจุด)"""
         if not self._waypoint_executing:
             return
+        if bool(getattr(self, "_mission_core_authority", False)):
+            return  # Core telemetry/mission engine owns progression + GOTO
         route = self._waypoint_route
         if route is None or self._wp_current_index >= len(route):
             self._wp_finish()
@@ -7538,11 +8055,8 @@ class GroundStation(QMainWindow):
             # Swarm/Grouped — คงรูปขบวน/ระยะห่างไว้ทุกจุดตลอดเส้นทาง
             pos = {d: p for d, p in self._fleet_positions().items() if d in ids}
             latlon = {d: (p[1], p[0]) for d, p in pos.items()}   # (lon,lat)→(lat,lon)
-            wp_targets = waypoint_logic.waypoint_swarm_targets(
-                latlon, wp.lat, wp.lon, keep_formation=True)
-            for d in ids:
-                wp_targets.setdefault(d, (wp.lat, wp.lon))
-            order = self._goto_order(ids, latlon, wp.lat, wp.lon)
+            wp_targets, order = waypoint_logic.grouped_dispatch_plan(
+                ids, latlon, wp.lat, wp.lon)
             generation = self._wave_generation
             for i, did in enumerate(order):
                 tlat, tlon = wp_targets[did]
@@ -7551,8 +8065,9 @@ class GroundStation(QMainWindow):
                     i * 150,
                     lambda d=did, la=tlat, lo=tlon, a=alt, g=generation:
                     self._goto_one(d, la, lo, a)
-                    if (self._waypoint_executing
-                        and (not self._wave_executing or g == self._wave_generation))
+                    if waypoint_logic.grouped_dispatch_generation_valid(
+                        self._waypoint_executing, self._wave_executing,
+                        g, self._wave_generation)
                     else None)
                 self._js(f"setTarget({did},{tlat:.7f},{tlon:.7f},"
                          f"{drone_color(did)!r})")
@@ -7641,7 +8156,9 @@ class GroundStation(QMainWindow):
             return
 
         def worker():
-            self._safe(lambda: self.client.hold(ids))
+            self._safe(lambda: self._dispatch_core(
+                "HOLD [waypoint-wait]", lambda: self.client.hold(ids),
+                source="waypoint-wait", targets=ids, enforce_dedup=False))
         threading.Thread(target=worker, daemon=True).start()
 
     def _wp_wait_valid(self, entry):
@@ -7677,6 +8194,13 @@ class GroundStation(QMainWindow):
 
     def _wp_wait_tick(self):
         """ตัวเรียกตรวจ WAIT ทุก 500ms — timer ไม่ใช่ authority ของ state"""
+        if bool(getattr(self, "_mission_core_authority", False)):
+            # F5/F6: Core owns WAIT deadline and progression.  A stale Python
+            # timer may refresh presentation only; it must never run on_done.
+            self._wp_waits = {}
+            self._wp_wait_timer.stop()
+            self._wp_render_status()
+            return
         if not self._wp_waits:
             self._wp_wait_timer.stop()
             return
@@ -8017,7 +8541,10 @@ class GroundStation(QMainWindow):
 
         def worker():
             try:
-                r = self.client.stop_all([int(d) for d in ids])
+                web_ids = [int(d) for d in ids]
+                r = self._dispatch_core(
+                    "STOP ALL [tablet]", lambda: self.client.stop_all(web_ids),
+                    source="tablet", targets=web_ids, enforce_dedup=False)
                 self.cmd_result.emit("HOLD ALL: ok=%s %s" % (
                     getattr(r, "ok", True), getattr(r, "message", "")))
             except Exception as e:
@@ -8197,6 +8724,8 @@ class GroundStation(QMainWindow):
     def _web_move(self, p):
         if not self._guard():
             return False, "REMOTE เปิดอยู่ — สลับเป็น UI ที่คอมควบคุมก่อน"
+        if self._manual_nav_blocked_by_core("MOVE [tablet]"):
+            return False, "Core mission กำลังควบคุมอยู่ — ยกเลิก Mission ก่อนบังคับสด"
         name = str(p.get("dir") or "").upper()
         if name not in self.WEB_MOVE_DIRS:
             return False, "ทิศทางไม่ถูกต้อง"
@@ -8376,7 +8905,8 @@ class GroundStation(QMainWindow):
         if not online or not any(d in online for d in self._target_ids()):
             return False, "ไม่มีโดรนที่เชื่อมต่ออยู่สำหรับ TAKEOFF"
         self._run_cmd("TAKEOFF %.0fm [tablet]" % alt,
-                      lambda ids: self.client.takeoff(ids, alt, confirmed=True))
+                      lambda ids: self.client.takeoff(ids, alt, confirmed=True),
+                      dedup_key=f"TAKEOFF|alt={alt!r}|confirmed=True")
         # HTTP ตอบได้แค่ว่าคอกพิตรับคำสั่งแล้ว ผลจาก FC จะถูก mirror กลับ
         # ทาง notice ใน _on_cmd_result เพื่อไม่หลอกว่าบินขึ้นสำเร็จก่อนเวลา.
         return True, "กำลังส่ง TAKEOFF %.0f m — รอผลจากโดรน" % alt
@@ -8390,6 +8920,8 @@ class GroundStation(QMainWindow):
 
     def _web_set_mode(self, p):
         """เปลี่ยน flight mode จากแท็บเล็ตผ่าน CoreClient เส้นเดียวกับคอกพิต."""
+        if self._manual_nav_blocked_by_core("MODE [tablet]"):
+            return False, "Core mission กำลังควบคุมอยู่ — ยกเลิก Mission ก่อนเปลี่ยนโหมด"
         name = str(p.get("mode") or "").strip().upper()
         enum_name = self._WEB_FLIGHT_MODES.get(name)
         if not enum_name:
@@ -8405,6 +8937,8 @@ class GroundStation(QMainWindow):
         return True, "กำลังเปลี่ยนเป็น %s — รอผลจากโดรน" % name
 
     def _web_goto(self, p):
+        if self._manual_nav_blocked_by_core("GOTO [tablet]"):
+            return False, "Core mission กำลังควบคุมอยู่ — ยกเลิก Mission ก่อน GOTO"
         try:
             lat, lon = float(p.get("lat")), float(p.get("lon"))
         except (TypeError, ValueError):
@@ -8563,6 +9097,11 @@ class GroundStation(QMainWindow):
     def _on_telemetry(self, t):
         if t.drone_id in self._removed_ids:
             return
+        # V1 Phase 3 shadow write: ingest every accepted packet into the immutable
+        # frontend read model.  This does not throttle/replace raw telemetry used
+        # by flight/business logic below.
+        telem_view = self._telemetry_store.update(t)
+        render_widgets = self._telemetry_render_gate.should_render(telem_view)
         item = self.fleet_items.get(t.drone_id)
         display_name = self._fleet_presenter.display_name(
             t.drone_id, self._drone_names.get(int(t.drone_id)), t.name)
@@ -8585,15 +9124,37 @@ class GroundStation(QMainWindow):
             if hasattr(self, "mlog"):
                 self.mlog.set_vehicles(self.fleet_items.keys())
             self._log(f"Drone {t.drone_id} added to fleet", vehicle=f"Drone {t.drone_id}")
-        item.update_from_telemetry(t)
+        if render_widgets:
+            item.update_from_telemetry(telem_view)
+            self._health.record_render()
         item.set_display_name(display_name)
         self._last_telem[t.drone_id] = t
+        # Shadow parity check is sampled (first packets + every 100th) so the
+        # comparison itself cannot become telemetry-load overhead.
+        ingest_count = self._telemetry_store.ingest_count(t.drone_id)
+        if ingest_count <= 3 or ingest_count % 100 == 0:
+            shadow_diff = self._telemetry_store.diff_message(self._last_telem[t.drone_id])
+            if shadow_diff:
+                self._telemetry_shadow_mismatch_count += 1
+                if self._telemetry_shadow_mismatch_count <= 3:
+                    self._log(
+                        f"TelemetryStore shadow mismatch D{int(t.drone_id)}: "
+                        f"{','.join(shadow_diff[:6])}",
+                        vehicle="System", category="STATUS", severity="WARNING")
         self._health.note_telemetry(t.drone_id)   # observability: telemetry age
+
+        # F6: while Core owns the mission, telemetry is also the cheap reconnect/
+        # presentation heartbeat. Query at most once/second; never StartMission.
+        if bool(getattr(self, "_mission_core_authority", False)):
+            qnow = time.monotonic()
+            if qnow - float(getattr(self, "_mission_state_last_query", 0.0)) >= 1.0:
+                self._mission_state_last_query = qnow
+                mission_shadow.refresh_state(self, rebuild=False)
 
         # ส่งต่อให้ Field Tablet (ถ้าเปิด LAN อยู่) — hub มี lock ของตัวเอง
         # และรับเฉพาะ dict ล้วน จึงข้าม thread ไปให้ SSE อ่านได้ปลอดภัย
         if self.field is not None:
-            self._field_push(t, display_name)
+            self._field_push(telem_view, display_name)
 
         # ── เลือกลำแรกที่ "ออนไลน์จริง" ให้อัตโนมัติถ้ายังไม่ได้เลือกอะไรเลย ──
         # BUGFIX: เดิมบรรทัดนี้อยู่ในบล็อก "สร้างการ์ดใหม่" ข้างบนเท่านั้น
@@ -8610,12 +9171,13 @@ class GroundStation(QMainWindow):
             self._remember_endpoint(t.drone_id, th, int(getattr(t, "port", 0) or 0))
 
         if t.drone_id == self._selected_id:
-            self.sel_card.update_from_telemetry(t)
+            if render_widgets:
+                self.sel_card.update_from_telemetry(telem_view)
+                self._update_coord(telem_view)
+                if hasattr(self, "lbl_cur_mode"):
+                    self._style_cur_mode(rpc.mode_name(telem_view.mode))
             self.sel_card.set_display_name(display_name)
             self.sel_card.set_quick_enabled(self._ui_mode)   # มี telemetry = สั่งได้
-            self._update_coord(t)
-            if hasattr(self, "lbl_cur_mode"):
-                self._style_cur_mode(rpc.mode_name(t.mode))
 
         self._auto_guided_after_land(t)
         self._sync_servo_from_telemetry(t)
@@ -8708,8 +9270,10 @@ class GroundStation(QMainWindow):
         self._log(f"ลงจอดเสร็จ → ตั้งโหมด GUIDED อัตโนมัติ",
                   vehicle=f"Drone {did}", category="COMMAND")
         mode = getattr(rpc.common_pb2, "FLIGHT_MODE_GUIDED")
-        threading.Thread(target=lambda: self._safe(
-            lambda: self.client.set_mode([did], mode)), daemon=True).start()
+        threading.Thread(target=lambda: self._safe(lambda: self._dispatch_core(
+            "MODE GUIDED [auto-after-land]", lambda: self.client.set_mode([did], mode),
+            source="auto-after-land", targets=[did], enforce_dedup=False)),
+            daemon=True).start()
 
     def _update_coord(self, t):
         text = (
@@ -8735,15 +9299,19 @@ class GroundStation(QMainWindow):
             self.sel_card.set_head(int(drone_id) == self._head_id and self._head_id != 0)
             self.sel_card.set_servo_state(self._servo_state.get(int(drone_id)))
             self._refresh_servo_buttons()   # ปุ่ม A/B ต้องสะท้อนลำที่เพิ่งเลือก
+        # Presentation reads prefer the immutable Phase-3 store.  Raw telemetry
+        # remains available separately in _last_telem for flight/business paths.
         t = self._last_telem.get(drone_id)
-        if t is not None:
-            self.sel_card.update_from_telemetry(t)
+        presentation = self._telemetry_store.get(drone_id) or t
+        if presentation is not None:
+            self.sel_card.update_from_telemetry(presentation)
             self.sel_card.set_display_name(
-                self._drone_names.get(int(drone_id)) or t.name or f"Drone {drone_id}")
+                self._drone_names.get(int(drone_id))
+                or presentation.name or f"Drone {drone_id}")
             # BUGFIX: เดิมพอเคยเลือกลำที่ยังไม่มี telemetry ปุ่มจะถูกปิดค้างตลอด
             # เพราะไม่มีใครเปิดคืนตอนมี telemetry แล้ว → quick action กดไม่ได้
             self.sel_card.set_quick_enabled(self._ui_mode)
-            self._update_coord(t)
+            self._update_coord(presentation)
         else:
             # จาก SQLite / memory — ยังไม่มี telem
             self.sel_card.drone_id = int(drone_id or 0)
@@ -8781,6 +9349,8 @@ class GroundStation(QMainWindow):
         self._log(f"color → {color}", vehicle=f"Drone {drone_id}", category="STATUS")
 
     def _ping_drone(self, drone_id: int):
+        if getattr(self, "_closing", False):
+            return
         host, port = "", 0
         if hasattr(self, "sel_card") and (
                 not drone_id or drone_id == self._selected_id or drone_id == self.sel_card.drone_id):
@@ -8802,6 +9372,8 @@ class GroundStation(QMainWindow):
             pass
 
     def _auto_ping_selected(self):
+        if getattr(self, "_closing", False):
+            return
         did = self._selected_id
         if not did or self._ping.busy:
             return
@@ -8947,7 +9519,10 @@ class GroundStation(QMainWindow):
     def _demo_takeoff_parallel(self):
         self._log("TAKEOFF x3 (parallel) @ 20m", category="COMMAND")
         for i in (1, 2, 3):
-            threading.Thread(target=lambda k=i: self.client.takeoff([k], 20, confirmed=True), daemon=True).start()
+            threading.Thread(target=lambda k=i: self._dispatch_core(
+                "TAKEOFF 20m [demo]", lambda: self.client.takeoff([k], 20, confirmed=True),
+                source="demo", targets=[k], dedup_key="TAKEOFF|alt=20|confirmed=True",
+                enforce_dedup=False), daemon=True).start()
 
     # ── misc ──
     def _tick_clock(self):
@@ -8971,10 +9546,16 @@ class GroundStation(QMainWindow):
         snap = self._health.snapshot()
         ages = snap.get("telemetry_age_ms") or {}
         max_age = max(ages.values()) if ages else 0.0
+        telem_rate = self._telemetry_store.ingest_rate()
+        render_gate = self._telemetry_render_gate.stats()
+        gated_total = render_gate["rendered"] + render_gate["skipped"]
+        skip_pct = (100.0 * render_gate["skipped"] / gated_total) if gated_total else 0.0
         self._log(
             f"HEALTH {snap['status']} · hb={snap['heartbeat_ms']:.0f}ms · "
             f"stalls={snap['stall_count']} · telem_max_age={max_age:.0f}ms · "
-            f"render={self._health.render_rate():.1f}/s",
+            f"telem_in={telem_rate:.1f}/s · render={self._health.render_rate():.1f}/s · "
+            f"telem_render_skip={skip_pct:.0f}% · "
+            f"shadow_mismatch={self._telemetry_shadow_mismatch_count}",
             vehicle="System", category="STATUS", severity="INFO")
 
     def _log(self, msg, vehicle="System", category="STATUS", severity="INFO"):
@@ -8982,6 +9563,10 @@ class GroundStation(QMainWindow):
             self.mlog.add(msg, vehicle=vehicle, category=category, severity=severity)
 
     def closeEvent(self, e):
+        # Flip the lifecycle guard before stopping timers/threads.  Queued
+        # singleShot callbacks may already be in the event queue; they must see
+        # closing=True before any QtWebEngine object starts being destroyed.
+        self._closing = True
         # หยุด timer ทุกตัวก่อน — ไม่งั้น callback ยังยิงต่อหลังหน้าต่างปิด
         # (watchdog/poll ที่ยิงใส่ object ที่กำลังถูกทำลาย = crash)
         self._rtl_active = False
@@ -8995,16 +9580,51 @@ class GroundStation(QMainWindow):
                     t.stop()
                 except Exception:
                     pass
+        # PingService owns a QThread which may be inside a Windows ping subprocess.
+        # Join it before Qt destroys this window/its child QObjects; otherwise the
+        # full suite can tear down a live QThread and crash natively (0xC0000005).
+        ping = getattr(self, "_ping", None)
+        if ping is not None:
+            try:
+                ping.shutdown(4000)
+            except Exception:
+                pass
         if getattr(self, "cv_panel", None):
             self.cv_panel.shutdown()
         if getattr(self, "field", None) is not None:
             self._field_stop()      # ปิดหน้าต่าง = ปิดพอร์ต LAN ด้วยเสมอ
-        if self.telem_thread:
-            self.telem_thread.stop()
-            self.telem_thread.wait(1500)
-        if getattr(self, "event_thread", None):
-            self.event_thread.stop()
-            self.event_thread.wait(1500)
+        # Stop both stream workers and JOIN them BEFORE closing the owned channel.
+        # Closing the gRPC channel while a worker is still inside the stream
+        # iterator is a native access violation, so the channel is released only
+        # once both QThreads are confirmed terminated.  Signals are disconnected
+        # first so no telemetry/event/error emit can land on this closing window.
+        threads_terminated = True
+        for name in ("telem_thread", "event_thread"):
+            th = getattr(self, name, None)
+            if th is None:
+                continue
+            for sig_name in ("telemetry", "stream_error", "event"):
+                sig = getattr(th, sig_name, None)
+                # Only touch real bound signals.  TelemetryThread has no ``event``
+                # signal, so ``th.event`` is QObject.event() (a method) — calling
+                # .disconnect() on it would raise and abort closeEvent from C++.
+                if sig is None or not hasattr(sig, "disconnect"):
+                    continue
+                try:
+                    sig.disconnect()
+                except (TypeError, RuntimeError):
+                    pass   # already disconnected / no slots
+            if not th.shutdown(2000):
+                threads_terminated = False
+        owned_client = getattr(self, "_owned_core_client", None)
+        if owned_client is not None and threads_terminated:
+            try:
+                owned_client.close()
+            finally:
+                self._owned_core_client = None
+        # If a worker did not terminate in time (unreachable with deterministic
+        # cancel above), the channel is deliberately left open rather than torn
+        # down under a live stream iterator; the OS reclaims it at process exit.
         super().closeEvent(e)
 
 

@@ -86,13 +86,17 @@ type Route struct {
 // MissionPlan is the immutable-after-accept plan (contract B1).  A plan is
 // frozen when a run starts; later edits do not affect a running run.
 type MissionPlan struct {
-	PlanID         string
-	Mode           Mode
-	Participants   []uint32
-	Routes         []Route
-	LeaderID       uint32  // SWARM_LEADER only: the drone whose arrival drives progression
-	ArrivalRadiusM float64 // horizontal arrival threshold; default DefaultArrivalRadiusM
-	RtlAfter       bool
+	PlanID               string
+	Mode                 Mode
+	Participants         []uint32
+	Routes               []Route
+	LeaderID             uint32  // SWARM_LEADER only: the drone whose arrival drives progression
+	ArrivalRadiusM       float64 // horizontal arrival threshold; default DefaultArrivalRadiusM
+	RtlAfter             bool
+	ReturnPolicy         ReturnPolicy
+	ReturnPolicyExplicit bool
+	SeparateReturnTiming SeparateReturnTiming
+	ParticipantAltitudes map[uint32]float64 // frozen per-drone mission altitude; GROUPED must not collapse to one shared alt
 }
 
 // DefaultArrivalRadiusM is the horizontal arrival threshold moved out of the
@@ -103,12 +107,13 @@ const DefaultArrivalRadiusM = 3.0
 const MaxWaitSeconds = 600
 
 var (
-	ErrNoPlanID       = errors.New("mission: plan_id required")
-	ErrNoParticipants = errors.New("mission: at least one participant required")
-	ErrNoRoute        = errors.New("mission: plan has no route")
-	ErrEmptyRoute     = errors.New("mission: route has no waypoints")
-	ErrBadWait        = errors.New("mission: wait_seconds out of range [0,600]")
-	ErrRouteMismatch  = errors.New("mission: routes do not match mode/participants")
+	ErrNoPlanID             = errors.New("mission: plan_id required")
+	ErrNoParticipants       = errors.New("mission: at least one participant required")
+	ErrNoRoute              = errors.New("mission: plan has no route")
+	ErrEmptyRoute           = errors.New("mission: route has no waypoints")
+	ErrBadWait              = errors.New("mission: wait_seconds out of range [0,600]")
+	ErrRouteMismatch        = errors.New("mission: routes do not match mode/participants")
+	ErrAuthorityUnsupported = errors.New("mission: plan is not eligible for Core waypoint authority")
 )
 
 // Validate checks structural invariants without any side effect.  It does not
@@ -155,19 +160,37 @@ func (p *MissionPlan) Validate() error {
 			}
 		}
 	case ModeSeparate:
-		// one route per participant, each keyed by a participant id
-		if len(p.Routes) != len(p.Participants) {
-			return fmt.Errorf("%w: SEPARATE expects %d routes, got %d",
-				ErrRouteMismatch, len(p.Participants), len(p.Routes))
-		}
+		// Exact participant <-> route bijection.  SEPARATE cannot canonicalize a
+		// malformed participant list because doing so could silently leave a drone
+		// without an independently-progressing route.
 		known := make(map[uint32]bool, len(p.Participants))
 		for _, id := range p.Participants {
+			if known[id] {
+				return fmt.Errorf("%w: duplicate SEPARATE participant drone %d",
+					ErrRouteMismatch, id)
+			}
 			known[id] = true
 		}
+		if len(p.Routes) != len(known) {
+			return fmt.Errorf("%w: SEPARATE expects %d unique routes, got %d",
+				ErrRouteMismatch, len(known), len(p.Routes))
+		}
+		seenRoutes := make(map[uint32]bool, len(p.Routes))
 		for _, r := range p.Routes {
 			if !known[r.DroneID] {
 				return fmt.Errorf("%w: SEPARATE route for non-participant drone %d",
 					ErrRouteMismatch, r.DroneID)
+			}
+			if seenRoutes[r.DroneID] {
+				return fmt.Errorf("%w: duplicate SEPARATE route for drone %d",
+					ErrRouteMismatch, r.DroneID)
+			}
+			seenRoutes[r.DroneID] = true
+		}
+		for id := range known {
+			if !seenRoutes[id] {
+				return fmt.Errorf("%w: missing SEPARATE route for drone %d",
+					ErrRouteMismatch, id)
 			}
 		}
 	default:
@@ -177,6 +200,72 @@ func (p *MissionPlan) Validate() error {
 }
 
 // arrivalRadius returns the effective arrival radius (default if unset).
+// ValidateAuthorityV1 gates the first Go waypoint-authority cutover.  Shadow
+// missions intentionally accept the broader contract, but the initial command
+// executor is restricted to one drone on one GROUPED route with no WAIT,
+// payload action, WAVE/leader semantics, or post-route RTL.  Unsupported plans
+// must remain Python-owned rather than silently changing flight behavior.
+func (p *MissionPlan) ValidateAuthorityV1() error {
+	if err := p.validateAuthorityBase(); err != nil {
+		return err
+	}
+	for _, wp := range p.sharedRoute().Points {
+		if wp.WaitSeconds != 0 {
+			return fmt.Errorf("%w: WAIT is deferred", ErrAuthorityUnsupported)
+		}
+	}
+	return nil
+}
+
+// ValidateAuthorityV2 is the F5 scope: the same single-drone GROUPED boundary as
+// V1, but WAIT metadata is now Core-owned. Payload actions/WAVE/rtl_after remain
+// deferred and therefore cannot accidentally enter this authority path.
+func (p *MissionPlan) ValidateAuthorityV2() error {
+	return p.validateAuthorityBase()
+}
+
+func (p *MissionPlan) validateAuthorityBase() error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	if p.Mode != ModeGrouped {
+		return fmt.Errorf("%w: mode %s", ErrAuthorityUnsupported, p.Mode)
+	}
+	if len(p.Participants) != 1 {
+		return fmt.Errorf("%w: Core authority requires exactly 1 participant, got %d",
+			ErrAuthorityUnsupported, len(p.Participants))
+	}
+	if p.RtlAfter || p.ReturnPolicy != ReturnNone {
+		return fmt.Errorf("%w: rtl_after is deferred", ErrAuthorityUnsupported)
+	}
+	for _, wp := range p.sharedRoute().Points {
+		if wp.Action != ActionNone {
+			return fmt.Errorf("%w: payload action is deferred", ErrAuthorityUnsupported)
+		}
+	}
+	return nil
+}
+
+// arrivalRadius returns the effective arrival radius (default if unset).
+// clone returns a deep copy so an accepted run/query cannot be mutated through
+// caller-owned slices or maps after StartMission freezes the plan.
+func (p MissionPlan) clone() MissionPlan {
+	out := p
+	out.Participants = append([]uint32(nil), p.Participants...)
+	out.Routes = make([]Route, len(p.Routes))
+	for i, r := range p.Routes {
+		out.Routes[i] = r
+		out.Routes[i].Points = append([]Waypoint(nil), r.Points...)
+	}
+	if p.ParticipantAltitudes != nil {
+		out.ParticipantAltitudes = make(map[uint32]float64, len(p.ParticipantAltitudes))
+		for id, alt := range p.ParticipantAltitudes {
+			out.ParticipantAltitudes[id] = alt
+		}
+	}
+	return out
+}
+
 func (p *MissionPlan) arrivalRadius() float64 {
 	if p.ArrivalRadiusM <= 0 {
 		return DefaultArrivalRadiusM
@@ -197,4 +286,17 @@ func (p *MissionPlan) routeFor(droneID uint32) (Route, bool) {
 		}
 	}
 	return Route{}, false
+}
+
+// AltitudeFor resolves the frozen mission altitude for one participant.
+// Stage B GROUPED authority must use this instead of collapsing all drones to
+// the shared waypoint Alt.  waypointAlt is retained as a backward-compatible
+// fallback for older/shadow plans that do not yet carry participant_altitudes.
+func (p *MissionPlan) AltitudeFor(droneID uint32, waypointAlt float64) float64 {
+	if p.ParticipantAltitudes != nil {
+		if alt, ok := p.ParticipantAltitudes[droneID]; ok && alt > 0 {
+			return alt
+		}
+	}
+	return waypointAlt
 }

@@ -1,33 +1,123 @@
 # Architecture Migration Progress
 
+> **Canonical roadmap is now `docs/V3_MASTER_ROADMAP.md` (2026-08-28).**
+> This notebook remains historical implementation/evidence detail. Old `V1 Phase ...` and `V2 F...` labels below are preserved for traceability only; current status/next-step naming must use V3 IDs.
+
 > สมุดส่งเวรหลัก (handoff notebook) ของงาน Low-Risk Architecture Migration
 > ถ้า session จบ / quota หมด / เปลี่ยน AI → เปิดไฟล์นี้แล้วทำต่อได้ทันที
 > ไฟล์นี้สำคัญกว่า `CODEX_CHANGES.md` (นั่นเก็บของที่ทำเสร็จ; ไฟล์นี้เก็บงานค้าง + exact next step + เหตุผล)
 
+## Latest Checkpoint — V3-S09 FRESH INDEPENDENT PRE-FLIP RE-REVIEW PASS / READY TO FREEZE (2026-08-30)
+- **CURRENT VERDICT:** `FINAL REVIEW PASS — 0 CRITICAL / 0 HIGH — S09 PRE-FLIP BASELINE READY TO FREEZE`. This review does **not** itself mark the baseline frozen and authorizes **no authority flip**.
+- **CURRENT-SOURCE FAILSAFE PROOF:** Mission GOTO/HOLD retain their composed fleet final-write guard; steady-state Formation retains its guarded `GotoYawContext`. The later form-up gap is closed at the actual transport boundary for the leader pin and every follower transit/horizontal/final-slot write using the exact aircraft ID. Generic SINGLE/GROUPED automatic Return now composes `WithFailsafeSendGuard(...)` before RTL while preserving the Return lease/cancellation guard.
+- **LOCK/ACK SCOPE:** `WithAdditionalSendGuard` keeps the existing ownership/cancellation guard outermost and the fleet failsafe guard inner. `DoIfFailsafeInactive` covers only `conn.Send`; `fleet.sendCmd` waits for COMMAND_ACK after `guardedSend` returns, so `fsMu` is not held during ACK waiting.
+- **PRIOR CLOSURES REVERIFIED:** typed-nil swarm coordinators return nil safely and SWARM_LEADER StartMission without a manager fails closed; SWARM_RETURN guards GOTO/LAND/fallback RTL; takeover arbitration determines accepted targets before Mission/Formation/Return side effects; rejected weaker targets remain side-effect free; Return distinguishes Succeeded/Cancelled/Failed; succession Return uses current membership and excluded participants do not auto-rejoin.
+- **RESTART/AUTHORITY:** active, WAIT, SEPARATE, SWARM_LEADER, succession, RETURN_PENDING/RETURNING, and payload evidence restore command-inert with no automatic navigation. `missionAuthorityMode` still recognizes only `core-single` and `core-single-wait`; every S09 token remains OFF.
+- **INDEPENDENT VALIDATION:** form-up, generic Return RTL, composed-guard, and prior blocker regressions PASS ×10; mission succession/Return regressions PASS ×10; targeted six-package gate PASS; restart/live-gate regressions PASS; full `go test ./... -count=1` PASS; `go vet ./...` PASS; `git diff --check` PASS with only two pre-existing frontend CRLF conversion warnings. Race detector was not run by policy. No frontend rerun was required because no protobuf/UI contract changed.
+- **MEDIUM:** durable membership-before-FC-send ordering remains **DEFERRED / NON-BLOCKING**. Restart remains command-inert and no evidence justifies elevation.
+- **LOW:** `internal/fleet/testsupport.go` exposes internal-package test constructors in a production-compiled file because cross-package tests cannot import `_test.go` helpers. It has no I/O, goroutines, or production caller and is not a freeze blocker; future cleanup may move the harness behind a narrower internal testing package if desired. The leader and first-follower form-up tests latch failsafe before entering `formUpSequential` rather than pausing after planning; they still exercise the real final-write guard (there is no intervening form-up failsafe precheck), while the later-phase test proves a mid-sequence latch. A future test-only planning barrier could make that chronology more literal without changing the verified production result.
+- **EXACT NEXT STEP:** perform the separate administrative action **FREEZE S09 PRE-FLIP SOFTWARE BASELINE**. Freeze must retain every S09 live token OFF and does not authorize deployment, HIL/FC control, H02 execution, or real flight. After freeze, stop S09 software edits unless a new proven defect appears and proceed according to the staged validation plan; V3-H02 remains future hardware work and V3-R01 remains locked.
+
+## Previous Checkpoint — V3-S09-C TAKEOVER/SUCCESSION PRE-FLIP COMPLETE (2026-08-30)
+- **PRODUCT CONTRACT:** ratified; no longer `DECISION REQUIRED`. Follower takeover excludes only that follower and the remaining swarm continues the SAME mission. Leader takeover excludes the old Leader and promotes the next eligible participant in ORIGINAL participant order, preserving `run_id` and route/index. Excluded participants never auto-rejoin the run. No eligible successor / below minimum formation ⇒ mission `INTERRUPTED`. No automatic SWARM_LEADER→SINGLE conversion; no invented RTL/LAND.
+- **IMPLEMENTATION:** three existing owners, no parallel safety system. `Engine.BeginSwarmOperatorTakeover`/`CompleteSwarmOperatorTakeover` hold membership + succession revision and freeze progression while a handoff is pending; `Server.applySwarmMissionTakeoversLocked` runs before the generic ownership cancel and revokes the leader's in-flight send; `swarm.Manager.RebindMissionMembership` swaps leader/members atomically and bumps `formationGen` so the previous formation generation is stale. Mission ownership follows the current runtime leader only, so an excluded drone is owned by neither mission nor formation.
+- **CONTINUATION FIXES:** `Run.leaderID()` no longer falls back to the frozen `Plan.LeaderID` once succession membership is tracked — the deliberate "no successor remains" state (`currentLeaderID = 0`) previously reported the EXCLUDED original leader into snapshot and durable evidence. The post-promotion observation gate is unchanged (deliberately EXCLUSIVE); its timing-dependent test was made deterministic with a fake clock.
+- **PERSISTENCE/RESTART:** the promoted leader plus the active/excluded partition are durable, and validation accepts a legitimately promoted leader while rejecting inconsistent membership. Restart after AND during a succession restores as `INTERRUPTED` + recovery-required, `Active=false`, `Authority=false`, zero automatic commands, with no auto-rejoin of excluded members.
+- **AUTHORITY GATE:** unchanged. `core-swarm-leader` has no production caller (`EnableSwarmLeaderAuthority()` is test-only) and `missionAuthorityMode` accepts only `core-single` / `core-single-wait`.
+- **VALIDATION:** targeted backend scope 6/6 packages PASS; full backend 29/29 packages PASS; `go vet ./...` PASS with zero diagnostics; full frontend suite 1110 passed with 3 pre-existing environment errors (`PermissionError [WinError 5]` on pytest's own temp root in `test_v3_s12_endurance.py`, reproducible in isolation, unrelated to this change — no frontend file was modified). Race detector not run. No SITL, hardware, FC, or controlled-flight evidence is claimed.
+- **EXACT NEXT STEP:** independent frozen-source review of this delta plus the still-open Round 4 re-check of the async revocation/final-write-guard design; then a separate explicit authority-validation/flip task. Do not combine with H02 baseline or V3-R01.
+
+## Previous Checkpoint — V3-S09-F RETURN POLICY PRE-FLIP COMPLETE (2026-08-30)
+- **PRODUCT CONTRACT:** ratified. `rtl_after` is now compatibility input mapped to an explicit Return Policy (`NONE`, `RTL_ALL_AFTER_MISSION`, `SWARM_RETURN`, `WAVE_MANAGED_RETURN`), not a direct command boolean.
+- **IMPLEMENTATION:** natural completion retires mission navigation before Return can claim ownership. Generic Return uses command.Service, stable request identity, whole-batch per-target reservations, cancellable/final-write guards, and no ownership lock across FC ACK waits. SWARM delegates to the existing Swarm Return manager; WAVE keeps one managed return path.
+- **INVALIDATION:** Cancel, operator/emergency takeover, and fleet/FC failsafe suppress pending/returning intent permanently. The automatic RTL entry checks the fleet failsafe latch so fleet/FC remains the sole safety owner.
+- **PERSISTENCE/RESTART:** resolved policy and Return lifecycle evidence are durable. Pending/returning records restore as `INTERRUPTED` + Return recovery-required evidence, `Active=false`, `Authority=false`, with zero automatic commands.
+- **DEFERRED BY CONTRACT:** SEPARATE `RETURN_EACH_ON_ROUTE_COMPLETE` is modeled but rejected pending corridor safety. (At this historical checkpoint the SWARM operator-takeover policy had not yet been ratified; it was later ratified and implemented PRE-FLIP in S09-C.)
+- **AUTHORITY GATE:** unchanged. Only `core-single` and `core-single-wait` are live and they still reject Return input. No token enables the new pre-flip execution gate; `core-grouped-multi`, `core-separate`, `core-swarm-leader`, `core-wave`, and `core-payload` remain OFF.
+- **VALIDATION:** exact targeted backend scope 6/6 packages PASS; full backend 29/29 packages PASS; `go vet ./...` PASS with zero diagnostics; affected frontend scope 378/378 tests PASS (one pytest cache-permission warning only). No SITL, hardware, FC, or controlled-flight evidence is claimed; actual FC evidence remains V3-H02 work and controlled real flight remains locked.
+- **EXACT NEXT STEP:** independent frozen-source review, then a separate explicit authority-validation/flip task. Do not combine it with H02 baseline or V3-R01.
+
+## Previous Checkpoint — V3-S12 CURRENT OPERATIONAL GATE COMPLETE (2026-08-30)
+- **CURRENT TRACK:** `docs/V3_MASTER_ROADMAP.md`
+- **CURRENT STAGE:** **V3-S12 — SITL Endurance + Performance**. Current operational gate is complete. The user elected to exceed the earlier 30-minute minimum with a **6-hour continuous overnight single-drone SITL soak**, followed by reconnect and client-lifecycle evidence.
+- **PRIOR V3 STATUS:** V3-S01–S08 COMPLETE; V3-S09 **PRE-FLIP COMPLETE / AUTHORITY NOT FLIPPED**; V3-S10 COMPLETE; V3-S11 COMPLETE.
+- **S12 TOOLING:** canonical runner `scripts/v3_s12_endurance.py`; duration/scenario configurable; machine-readable JSON evidence; resource/telemetry/RPC/reconnect/mission/file-growth metrics; deterministic cleanup; deferred extended-endurance commands remain documented in `docs/V3_S12_SITL_ENDURANCE_PERFORMANCE.md`.
+- **OVERNIGHT ENDURANCE EVIDENCE:** `idle-connected` **6h PASS** = 21,600.172 s / 216,002 telemetry / 723 RPC / 0 RPC error / 0 stream error / 0 UI stall / no harness hard failure or investigate trend. `reconnect-churn` **15m PASS** = 15 reconnects / 9,002 telemetry / 0 RPC-stream error. `client-lifecycle` **15m PASS** = 75 create/snapshot/close cycles / 9,003 telemetry / 0 RPC-stream error / Core OS threads stable.
+- **RESOURCE SUMMARY:** 6h Python RSS +1.91 MB with no monotonic-growth investigation flag; Python OS threads 16→13; Core RSS 132.4 MB→31.9 MB after startup settling; Core OS threads 11→12; mean RPC latency ~0.98 ms. Database file size delta 0 B.
+- **FOLLOW-UP OBSERVATION:** Core stdout recorded one `registry upsert drone 1 failed: database is locked (5) (SQLITE_BUSY)` warning during the 6h run. Telemetry/RPC continued and the warning did not repeat in captured stdout. Track as non-blocking SQLite contention follow-up; it did not cause an endurance or flight-safety failure in this run.
+- **REGRESSION:** S12 tooling tests **18 PASS**; affected frontend S12/telemetry/lifecycle suite **48 PASS**; backend full `go test ./... -count=1` PASS; `go vet ./...` PASS; prior `git diff --check` PASS apart from pre-existing CRLF warnings.
+- **DEFERRED EXTENDED ENDURANCE:** 12h/24h soak, 5-drone / 10-drone long runs, and prepared-airborne mission Start/Cancel endurance remain available for later explicit validation but are **not current blockers**.
+- **AUTHORITY GATE:** only `core-single` and `core-single-wait` remain live. `core-grouped-multi`, `core-separate`, `core-swarm-leader`, `core-wave`, `core-payload` remain OFF. At this historical S12 checkpoint the SWARM follower operator-takeover policy had not yet been ratified and S09-F was still blocked; the newer S09 checkpoints above supersede both points.
+- **CLEANUP:** overnight Core/SITL test tasks were stopped after evidence completion.
+- **EXACT NEXT STEP:** S12 current operational gate is complete. The next real gate is **V3-H02 Actual FC / Airframe Bench**, which requires actual hardware. When the FC is ready, open `docs/V3_FULL_PRODUCTION_VALIDATION_PLAN.md` and begin **STEP 1 — V3-H02-A Actual FC Base Validation** using only `core-single` / `core-single-wait`; do not flip S09 during the initial hardware baseline. After H02-A passes, promote S09 scopes one at a time according to that validation plan. Do not start V3-R01 until the required hardware/scope gates pass. SQLite contention can be reviewed separately without reopening the endurance gate unless it reproduces or affects operation.
+
+## Previous Checkpoint — V1 PHASE 3 DONE (Telemetry Store + gRPC lifecycle) / FULL FRONTEND 1031 GREEN (2026-08-28)
+- **TRACK:** V1 `PHASE_3_TO_10_CONTINUOUS_EXECUTION_PLAN` — **PHASE 3 COMPLETE. PHASE 4 NOT STARTED (held at user request).**
+- **PHASE 3 SCOPE (unchanged):** `TelemetryStore` is a frontend **presentation read model only**; flight/business logic still reads raw `_last_telem`. Migrated presentation readers: Fleet card, Selected Drone card, Field Tablet, Map3D. `TelemetryRenderGate` coalesces continuous telemetry to a ~0.10 s minimum render interval; discrete/operator-visible changes render immediately. Map2D target/waypoint coupling deliberately stays on raw telemetry this phase. Explicitly **not** migrated to the Store: `_fleet_positions`, `_collision_positions`, waypoint progression / `_wp_advance*` / `_on_target_reached`, GOTO logic, servo sync/prime, `_auto_guided_after_land`, `_last_alt`, `_home_pos`, failsafe/preflight/takeoff decisions, mission authority.
+- **LIFECYCLE REPAIR (root cause of the full-suite native crash):** the telemetry/event stream `QThread`s had a `run()`/`stop()` race — `stop()` no-op'd when `_call` was not yet assigned, so a worker could open the stream *after* stop and block inside the iterator; `closeEvent` then closed the gRPC channel under the live cygrpc iterator → `0xC0000005` access violation (`exit 3221225477`) at ~28 % of the suite (`test_map3d`). Fix: `core/grpc_client.py` `_StreamThread` base serializes `run()`/`stop()` under one lock (stop wins ⇒ stream never opened; run wins ⇒ call is cancelled), idempotent `stop()`, and a `shutdown()` join; `app.py closeEvent` disconnects only real bound signals (`hasattr(sig,"disconnect")` — `TelemetryThread.event` is `QObject.event`, not a signal), joins **both** workers, and closes the owned channel **only** once both are confirmed terminated.
+- **TEST-ISOLATION REPAIR:** fixing the crash let the whole suite run for the first time, exposing a pre-existing hygiene bug it had masked — some GUI tests build a `GroundStation` and never `close()` it, leaving a 5 s `_ping_timer` → `PingWorker` `QThread` that runs real `subprocess.run(['ping',...])`; caught by `test_launcher_safety`'s process-wide `subprocess.run` mock, this failed different tests on different runs (run 1: launcher; run 2: mission_shadow/servo/wave×2/waypoint_separate; **every failing test passes in isolation**). Fix: new `tests/conftest.py` autouse teardown closes any leaked `GroundStation` so its timers/stream threads stop before the next test. **Test infrastructure only — no product/command/authority/safety change.**
+- **VERIFICATION (this checkpoint, all run locally):** full frontend `python -m pytest -q tests` = **1031 passed / 0 failed** (deterministic; re-run green). Targeted: `test_grpc_lifecycle` **8/8** (incl. 50× GroundStation create/close stress, both stream kinds, stop-before-open, stop-while-blocked, idempotent stop, channel-closed-only-after-join, no-close-while-worker-stuck), `test_map3d` **53/53**, Phase 3 telemetry suite (`telemetry_store`+`telemetry_store_integration`+`health_monitor`+`map_presenter`+`map3d`+`ui_selection`) **132/132**. Backend `go test ./...` PASS all packages; `go vet ./...` PASS (Go untouched this phase).
+- **FILES CHANGED (Phase 3 lifecycle work):** `frontend/swarmgod_gui/core/grpc_client.py`, `frontend/swarmgod_gui/app.py` (`closeEvent` only); new `frontend/tests/test_grpc_lifecycle.py`, `frontend/tests/conftest.py`. **No Go source changed; `DroneGod` legacy untouched.**
+- **NOT CHANGED / STILL TRUE:** no Go flight-authority change; mission ownership / no-dual-authority / failsafe / safety semantics untouched. **F9B remains PENDING actual FC. F10 remains LOCKED.** No hardware/real-flight readiness is implied by these software tests.
+- **EXACT NEXT STEP:** **STOP. Do not start Phase 4** (Command Gateway) until the user explicitly authorizes it.
+
+## Previous Checkpoint — LEGACY PARITY BASELINE PRESERVED / F9A DONE / F9B ACTUAL-FC PENDING (2026-08-27)
+- **CURRENT TRACK:** `REAL_FLIGHT_SAFETY_FAST_TRACK_V2`
+- **CURRENT F-PHASE:** **F9A — Hardware-Bench Preparation ✅ DONE. F9B — Actual FC/Airframe Bench = PENDING actual FC.** F8 remains green for the guarded single-drone GROUPED + WAIT scope.
+- **AUTHORITY SCOPE:** exact tokens: `core-single` = one-participant GROUPED waypoint GOTO; `core-single-wait` = same + Core-owned WAIT/HOLD. They are allowed in SITL; HIL is allowed only behind the separate props-removed bench confirmation gate documented for F9B; production remains locked out. Multi-drone GROUPED, SEPARATE, SWARM_LEADER mission authority, WAVE, payload action, and `rtl_after` remain deferred/blocked.
+- **LEGACY PARITY BASELINE:** original `DroneGod` is now an explicit read-only behavioral reference. Direct hash comparison found frontend Python **59 identical / 3 different / 0 missing**, frontend tests **34 identical / 2 migration-specific different / 0 missing** (`test_mission_shadow.py` + WAVE no-overlap regression in `test_wave.py`), and Go flight-path baseline (`command/fleet/safety/swarm/mavlink/config`) **27 identical / 1 safety-hardened different / 0 missing**. See `docs/LEGACY_BEHAVIOR_PARITY.md`.
+- **PER-PLAN OWNERSHIP REPAIR:** `SWARMGOD_MISSION_AUTHORITY` remains global configuration, but authoritative ownership is selected per mission plan. Exact eligible single-drone GROUPED plans use Core; unsupported legacy capabilities (multi-drone GROUPED formation geometry, SEPARATE, SWARM Leader Path, payload A/B, and WAIT under `core-single`) do **not** call authoritative `StartMission` and deliberately keep the proven Python executor until separately migrated. Before any legacy mission starts under a Core token, `GetMissionState` must confirm no active Core-authority run; active/unknown Core slot = fail-closed, preventing cross-owner overlap. WAVE is guarded centrally inside `_wave_execute()` because Cockpit and Field Tablet can both enter that legacy automation without normal Mission Start; both paths now require the same Core-slot-idle proof.
+- **NO-DUAL-AUTHORITY:** when an *eligible* Start/Query confirms `authority_active=true`, Python suppresses waypoint GOTO, browser target callbacks cannot advance Python mission state, and ambiguous/lost eligible Start reply is fail-closed with Query recovery rather than Python fallback. Ineligible plans staying Python-owned are intentional ownership selection, not RPC-error fallback.
+- **F6/F7 VERIFIED:** cockpit restart/query rebuilds the frozen Core plan/run without duplicate Start/GOTO; deterministic and live failure injection covers duplicate Start, stale/cancel boundaries, battery/link interruption during WAIT, disconnect/reconnect during transit/WAIT, link-loss `INTERRUPTED`, Core process kill/restart and no mission auto-resume.
+- **F8 LIVE REPEAT VERIFIED:** `cmd/missionverify` completed **4/4** live SITL cycles on the same Core process: route + WAIT, disconnect/reconnect during transit and WAIT, duplicate Start, second-run Cancel, and cleanup confirmed landed/disarmed every cycle.
+- **F8 STRESS/LEAK CHECK:** 500 alternating terminal mission cycles PASS with no active-run/late-command leak. Core idle sample after cycle 3 vs cycle 4: working set **21.65→21.67 MB**, private **53.37→53.61 MB**, threads **11→11**, handles **155→155** — no obvious monotonic process-growth signal in this bounded gate.
+- **FAILSAFE HARDENING:** `command.Service.Goto` and `command.Service.Hold` now both reject when the fleet failsafe latch is active. Regression guards require the latch check before navigation/mode send, closing the WAIT-HOLD-vs-RTL race.
+- **REGRESSION:** targeted `command + mission + api` PASS; final `go test ./...` **PASS all packages**; full frontend `python -m pytest tests -q` **976/976 PASS in 736.56s (12:16)**.
+- **CORE CRASH / FC BLOCKER:** live SITL Core kill about 7s into a 250m mission proved restarted Core returns `IDLE/run_id=0`, but the FC continued the last GUIDED target and then hovered armed at 20m. Application no-resume is correct; onboard FC GCS/Core-link failsafe behavior is **not safe to assume**.
+- **F9A TOOLING DONE:** added `cmd/benchprobe` + `internal/bench` timing metrics, guarded `cmd/benchack`, read-only `scripts/bench_param_audit.py`, version-aware `docs/f9_expected_params.json`, evidence merger `scripts/f9_evidence_report.py`, self-tests, test fixture, and dedicated no-authority F9A SITL Core launcher.
+- **F9B HIL AUTHORITY PREPARED:** actual-FC bench can use profile `hil` only behind two exact keys: mission token (`core-single` / `core-single-wait`) plus `SWARMGOD_BENCH_CONFIRM=PROPS-REMOVED-BENCH`; `production` remains locked out. `scripts/run_f9b_hil_core.bat` additionally refuses to start without an explicit `SWARMGOD_HOME_LOC`. Gate regression PASS and full Go remains green.
+- **F9A LIVE NON-FLIGHT VALIDATION:** telemetry recorder on SITL: **101 samples / 10.00 Hz**, interval p95 **101 ms**, max **107 ms**, source-age p95 **1 ms**, max **3 ms**, mission IDLE. Guarded disarmed mode ACK harness: STABILIZE→GUIDED **OUTCOME_ACCEPTED ~3.58 ms**, restore STABILIZE **OUTCOME_ACCEPTED ~5.33 ms**; no Arm/Takeoff/navigation RPC exists in the tool.
+- **F9A PARAM CHARACTERIZATION:** current SITL snapshot uses `MAV_GCS_SYSID=255` + `ARMING_SKIPCHK=0`; audit correctly FAILS `FS_GCS_ENABLE=0` and `BATT_FS_CRT_ACT=0`. This failure is intentional evidence that good telemetry cannot override unsafe FC failsafe configuration.
+- **F9A REGRESSION:** `bench_param_audit_selftest.py` PASS; `f9_evidence_report_selftest.py` PASS; `go test ./...` PASS all packages including benchack static no-flight-command guard and bench timing tests.
+- **LEGACY PARITY REGRESSION:** stable-source full frontend baseline before independent audit repair was **993/993 PASS in 788.51s (13:08)**; full Go was PASS all packages.
+- **INDEPENDENT AUDIT REPAIR (H1/M1):** Claude's full-system audit found no CRITICAL issue, one HIGH manual-navigation overlap surface, and one MEDIUM authority-profile fail-permissive default. ChatGPT/MCP independently cross-checked source and confirmed H1 for ad-hoc cockpit/tablet GOTO + RC movement + Quick HOLD semantics (while Cancel Navigation/HOLD ALL already had an abort path), and confirmed M1. Repair now blocks ad-hoc GOTO/RC movement while Core owns the drone, drops stale queued GOTO/RC callbacks, makes HOLD/STOP an explicit Core-mission takeover, serializes StartMission with manual navigation at the Go API boundary, rejects manual GOTO/RC/alt-change for Core-owned participants, and requires an explicit matching `SWARMGOD_PROFILE` before authority tokens can activate.
+- **AUDIT-REPAIR TESTS:** targeted Go `./internal/api ./internal/mission ./internal/command` PASS; frontend `test_mission_shadow.py` **28/28 PASS** including manual GOTO/MOVE/HOLD takeover regressions; post-repair full `go test ./...` **PASS all packages**. Stable-source full frontend final regression is running as durable task `a537c9a7-be57-40b5-b6ad-2292bfceb6af`; do not mark H1/M1 fully closed until that task exits green.
+- **EVIDENCE:** `docs/MISSION_FAILURE_INJECTION_F7.md`, `docs/MISSION_SITL_F8_GATE.md`, and `docs/HARDWARE_BENCH_F9_GATE.md` (now split F9A/F9B with exact commands).
+- **EXACT NEXT STEP:** wait for durable frontend task `a537c9a7-be57-40b5-b6ad-2292bfceb6af`. If green, mark H1/M1 + MT1–MT3 closed and restore F6/F8 to VERIFIED PASS; then when the actual FC is available run **F9B only** under the team's physical bench-safety procedure. If the frontend task fails, reproduce/fix only the failing regression before any F9B work.
+- **SAFE/RUNNABLE:** **YES for guarded SITL single-drone GROUPED + WAIT and F9A bench preparation. NOT READY for real flight until F9B passes.**
+
+## Previous Checkpoint — ChatGPT+MCP Safety Takeover (2026-08-27)
+- **CURRENT TRACK:** `REAL_FLIGHT_SAFETY_FAST_TRACK_V2`
+- **CURRENT F-PHASE:** **F4 pre-authority B0/B1 — compatibility + safety preemption verified; Stage-B GOTO authority NOT STARTED**
+- **DONE:** F4 Stage A1 ✅ + **A2 ✅**; A2 Python shadow-submit remains non-authoritative. **B0 per-drone altitude compatibility ✅**: `MissionPlan.participant_altitudes` freezes `_last_alt/_alt_for` per participant end-to-end (Python proto → Go domain) with backward-compatible waypoint-alt fallback. **B1 safety wiring ✅**: Core Event Bus `ALARM battery|link` mirrors into `mission.Interrupt(...)` only; fleet manager remains sole owner of failsafe RTL.
+- **CURRENT WIP:** no authority dispatch code. Multi-drone GROUPED target geometry remains unresolved for Go authority: Python dynamically translates each drone from the current group centroid, preserves formation offsets, and staggers GOTO 150 ms; Go shadow still judges the shared route centre. Therefore multi-drone GROUPED remains **BLOCKED for authority**.
+- **FILES CHANGED:** `proto/swarmgod/v1/mission.proto`; regenerated `backend/gen/swarmgod/v1/mission.pb.go` + `frontend/swarmgod_gui/gen/swarmgod/v1/mission_pb2.py`; `backend/internal/mission/plan.go`, `plan_test.go`; `backend/internal/api/mission.go`, `mission_test.go`; `frontend/swarmgod_gui/core/mission_shadow.py`; `frontend/tests/test_mission_shadow.py`. Concurrent B1 WIP observed and preserved: `backend/internal/api/server.go` + safety-observer additions in `mission.go`/tests. Progress file updated only in `DroneGod_AI`.
+- **TESTS RUN:** A2 pre-check `test_mission_shadow.py + test_waypoint_failsafe.py` **18 PASS**; after altitude patch `go test ./internal/mission ./internal/api` PASS; `test_mission_shadow.py` **7 PASS**; combined `test_mission_shadow.py + test_waypoint_failsafe.py` **19 PASS**; full `go test ./...` PASS. Existing live A2 SITL evidence: Core shadow advanced `WP0 → WP1 → COMPLETED`, revision `3 → 4 → 5`, while legacy Python alone sent GOTO; cleanup LAND succeeded.
+- **TEST RESULTS:** per-drone GROUPED altitudes `D1=18.5`, `D2=27.0` survive proto conversion and resolve independently through `MissionPlan.AltitudeFor`; legacy/shadow plan missing map falls back to waypoint altitude. `TestMissionHandlersIssueNoCommand` still passes: mission API/observer has no GOTO/HOLD/TAKEOFF/RTL/Idempotent command call. Safety ALARM tests pass for participant battery/link and ignore WARN/non-participant/other categories.
+- **DECISIONS:** B0 altitude contract uses additive `map<uint32,double> participant_altitudes` instead of overloading shared waypoint `alt`. Stage-B first eligibility scope remains **single-drone GROUPED only**, **no WAIT, no payload action, no WAVE, no rtl_after**. Multi-drone authority is deferred until Go ports the formation-target resolver/arrival semantics. B1 safety observer is state-only and must never send or duplicate failsafe flight commands.
+- **RISKS:** no protected mode is crash-tolerant yet because Go still sends no mission GOTO. Multi-drone shared-centre arrival is not equivalent to Python offset targets. Real flight/hardware remains prohibited until independent Codex/Claude Opus review covers F4 authority, F5 WAIT, F6 reconnect, failsafe/stale-run behavior, plus SITL evidence.
+- **AUTHORITY BEFORE / AFTER:** unchanged — **Python waypoint executor YES / Go mission flight authority NO**. Shadow submit + Core state observation only. **No dual authority proven for current checkpoint** by frontend legacy-GOTO regression plus Go static no-command test.
+- **EXACT NEXT STEP:** **B2 authority-eligibility/no-dual-authority guard only** — add pure validation that Go authority can be eligible only for one-participant `MISSION_MODE_GROUPED` with zero WAIT/action/WAVE/rtl_after, and explicit tests that ineligible plans cannot enter authority mode. Do **not** add GOTO dispatch in the same sub-step. After B2 green, stop and review before any command-sink/authority cutover.
+- **NEXT FILE/METHOD/TEST:** `backend/internal/mission/plan.go` (new pure `AuthorityEligibility`/validation helper or equivalent) + `plan_test.go`; if an authority flag lives at API boundary, inspect `backend/internal/api/mission.go` but keep it command-free. Tests: eligible single GROUPED accepted; 2 participants / SEPARATE / SWARM_LEADER / WAIT / payload action / rtl_after rejected; existing `TestMissionHandlersIssueNoCommand` remains green.
+- **SAFE/RUNNABLE:** **YES for A2+B0+B1 shadow/pre-authority checkpoint. NOT READY for Stage-B GOTO authority, hardware, or real flight.**
+
 ## Current Status
-- **Active Roadmap:** `REAL_FLIGHT_SAFETY_FAST_TRACK_V2`
-- **Current F-Phase:** **F4 Stage A — IN PROGRESS.** part 1 (Go observation pipeline) ✅ DONE / inert / tested;
-  part 2 (Python shadow-submit) = NOT STARTED. F4 overall ยังไม่จบ (authority ยัง Python, ไม่ส่ง command)
-- **V1 Phase 3 Telemetry Store:** **NOT DONE / DEFERRED UNTIL AFTER SAFETY FAST-TRACK**
-- **Reason:** เลือก Safety Fast-Track V2 เพื่อเร่งย้าย mission authority ออกจาก Python
-  ก่อนการทดสอบบินจริง; V1 ยังไม่ถูกยกเลิก
-- **Completed checkpoint:** Phase 0–2C ✅ + **F0 ✅ + F1 ✅ (contract) + F2 ✅ (shadow engine) + F3 ✅ (Mission RPC)**
-- **Last full frontend:** **965 passed** (Phase 2C); F0 targeted 181. **Go: `go test ./...` ผ่านทุก package (mission 28, api 15)**
-- **Last updated:** 2026-08-27 (Opus 4.8 High: F1 → F2 → F3)
-- งาน migration ยัง **ไม่ย้าย flight authority จริง** — F3 = RPC boundary + shadow; Python ยัง execute จริง (F4 = cutover)
+- **Active Roadmap:** `docs/V3_MASTER_ROADMAP.md`
+- **Current Stage:** **V3-S09 — FINAL REVIEW PASS / 0 CRITICAL / 0 HIGH / READY TO FREEZE PRE-FLIP.** The review is complete, but S09 is not yet marked frozen and no authority flip occurred.
+- **Completed V3 checkpoints:** V3-S01–S08 ✅; V3-S09 **PRE-FLIP IMPLEMENTATION + FRESH INDEPENDENT REVIEW PASS / READY TO FREEZE / AUTHORITY NOT FLIPPED**; V3-S10 ✅ Persistence + Restartability; V3-S11 ✅ Failure Injection Expansion; V3-S12 current operational gate ✅.
+- **S12 evidence:** 6h idle-connected PASS (216,002 telemetry, 723 RPC, zero RPC/stream errors, zero UI stalls), 15m reconnect PASS (15 reconnects), and 15m client lifecycle PASS (75 create/snapshot/close cycles).
+- **Follow-up:** one transient `SQLITE_BUSY` registry-upsert warning occurred during the 6h run without service interruption; track separately as non-blocking SQLite contention follow-up.
+- **Last updated:** 2026-08-30 (S09 fresh independent PRE-FLIP re-review PASS, 0 Critical / 0 High, DroneGod_AI only)
+- **Authority now:** only `core-single` and `core-single-wait` may be live; no S09 authority flip occurred.
+- **Still intentionally unresolved:** no S09 product-policy decision is open. One Medium durability concern is explicitly deferred/non-blocking. The independent software review gate is complete; the remaining administrative gate is the explicit no-flip **S09 PRE-FLIP freeze**.
+- **Hardware/release boundary:** after Fresh Review PASS and a no-flip S09 PRE-FLIP freeze, the next physical gate is **V3-H02 Actual FC / Airframe Bench**. V3-R01 remains locked until H02 passes.
 
 ## Current Goal
-F1→F2→F3 เสร็จ. Go มี Mission RPC boundary (`StartMission`/`CancelMission`/`GetMissionState`)
-backed by shadow `mission.Engine` — run identity + idempotency + stale-safe cancel + reconnect query,
-โดยไม่ส่ง command และไม่แตะ Python executor.
-**F4 Stage A part 1 (Go observation pipeline) เสร็จแล้ว** — telemetry feed → shadow `Observe`/`Poll`,
-inert จนกว่าจะมี run (0 behavior change). งานถัดไป = **Stage A part 2: Python shadow-submit**
-(best-effort `start_mission`/`cancel_mission` จาก app.py, ยัง shadow, ไม่เปลี่ยน behavior).
-จากนั้น Stage B = authority cutover (RISK สูงสุด — ห้าม dual authority). **หยุด/รอไฟเขียวก่อนแต่ละ stage**
+Freeze the independently reviewed **S09 PRE-FLIP baseline** without authority flip, then stop further S09 software changes unless a new proven defect appears. Preserve the 12h/24h and multi-drone soak commands as deferred validation only and wait for **V3-H02 Actual FC / Airframe Bench** when hardware is available; do not claim controlled real-flight readiness before H02 passes.
 
 ## Active Roadmap
 
-`REAL_FLIGHT_SAFETY_FAST_TRACK_V2`
+`docs/V3_MASTER_ROADMAP.md`
 
 V1 Phase 3 Telemetry Store, telemetry reader migration, render coalescing, presenter เพิ่ม,
 system-wide Command Gateway/dedup, persistence และ cosmetic cleanup =
@@ -37,27 +127,28 @@ system-wide Command Gateway/dedup, persistence และ cosmetic cleanup =
 | Subsystem | Current Authority | Target Authority | Cutover Status |
 |---|---|---|---|
 | Plan build/edit | Python | Python | คงเดิม (UI) |
-| Mission Start/Cancel | Python | Go (run_id) | **RPC boundary + run identity มีแล้ว (F3)**; Python ยังไม่เรียก (F4) |
-| Mission state query | Python vars | Go GetMissionState | **RPC มีแล้ว (F3)**; UI ยังไม่ query (F6) |
-| Waypoint progression | Python executor | Go Mission Engine | **SHADOW คำนวณได้ (F2)**; authority ยัง Python (F4) |
-| **Arrival detection** | **Browser map JS (3.0m)** | Go (telemetry+radius) | **F4-A: telemetry feed → `Observe` wired (inert)**; UI ยัง authority จริง (F4-B) |
-| WAIT / HOLD | Python (Qt 500ms poll) | Go state | **SHADOW WAIT+Poll มีแล้ว (F2)**; authority ยัง Python (F5) |
-| Payload action A/B | Python | Go | NOT STARTED (F5/F6B) |
-| GOTO/HOLD command | Python→command.Service | Mission Engine→command.Service | path พร้อม, authority ยัง Python |
-| Failsafe (battery/link) | **Go Core** ✅ | Go Core | มีแล้ว (คงไว้) |
-| Mission state storage | Python process memory | Go in-memory (V2) | NOT STARTED (F3/F6) |
-| run identity | Python `itertools.count` (process-local) | Core-generated run_id | NOT STARTED (F3) |
+| Mission Start/Cancel | Python operator intent → Go RPC | Go (run_id) | **DONE for guarded scope**; Core owns run identity/idempotency |
+| Mission state query | Go `GetMissionState` → Python display cache | Go GetMissionState | **DONE (F6)**; restart/rebind reconstructs frozen plan/run |
+| Waypoint progression | **Go Mission Engine** when exact SITL authority token is enabled | Go Mission Engine | **DONE for single-drone GROUPED**; other mission modes deferred |
+| **Arrival detection** | **Go telemetry + arrival radius** in guarded authority scope | Go (telemetry+radius) | **DONE for guarded scope**; browser callback cannot advance Core-owned run |
+| WAIT / HOLD | **Go Mission Engine + command.Service** in `core-single-wait` | Go state | **DONE (F5)** for guarded single-drone WAIT |
+| Payload action A/B | Python | Go | DEFERRED / F6B conditional |
+| GOTO/HOLD command | **Go API adapter → command.Service** in guarded authority scope | Mission Engine intent → command.Service | claim-once; GOTO/HOLD both yield to failsafe latch |
+| Failsafe (battery/link) | **Go Core** ✅ | Go Core | fleet remains sole flight-action owner; mission state INTERRUPTED |
+| Mission state storage | **Go in-memory (V2)** | Go in-memory (V2) | DONE for UI-restart goal; Core restart intentionally starts IDLE |
+| run identity | **Core-generated run_id** | Core-generated run_id | DONE; stale/duplicate Start/Cancel coverage green |
 
 ## Protected Real-Flight Modes (crash-tolerant?)
-- Waypoint (GROUPED): **NO** (ยังไม่ cutover — ห้ามอ้างว่า crash-safe)
-- WAIT: **NO**
-- Swarm formation: partial (Go ถือ formation loop + failsafe interlock แล้ว แต่ mission progression ยัง Python)
-- WAVE: **NO** (DEFER — V2 §3.6, ทำเฉพาะถ้า flight รอบแรกต้องใช้ = F6B)
-- Payload automation: **NO**
+- Waypoint (single-drone GROUPED): **Software/UI-crash tolerant in SITL ✅; NOT real-flight cleared until F9B.**
+- WAIT (same guarded scope): **Software/UI-crash tolerant in SITL ✅; NOT real-flight cleared until F9B.**
+- Multi-drone GROUPED: **NO — geometry/arrival authority deferred.**
+- Swarm formation mission progression: **partial / not protected by this mission cutover.**
+- WAVE: **NO** (DEFER — V2 §3.6 / F6B conditional).
+- Payload automation: **NO**.
 
-> ยังไม่มี mode ใดเป็น crash-tolerant — ทุก mission progression ยังตายพร้อม Python. นี่คือเป้าหมายของ F2→F6.
+> Core-owned guarded waypoint+WAIT now survives cockpit loss/restart, but Core-process loss still depends on onboard FC failsafe behavior. Therefore crash tolerance is proven only for the UI boundary; real-flight clearance remains blocked on F9B actual-FC verification.
 
-## Fast-Track F4 Checkpoint (IN PROGRESS — Stage A)
+## Historical Fast-Track F4 Checkpoint (Stage-A snapshot; superseded by Latest Checkpoint)
 
 ### CURRENT F-PHASE
 - **F4 — Waypoint Execution Authority → Go.** RISK สูงสุด. ทำเป็น sub-stage:
@@ -792,3 +883,44 @@ system-wide Command Gateway/dedup, persistence และ cosmetic cleanup =
 - Branch: `main2` (up to date with origin/main2)
 - WIP feature diff ใหญ่และยังไม่ commit; migration เพิ่ม controller/test/docs โดยไม่ revert ของเดิม
 - ยังไม่มี commit จากงาน migration นี้
+
+## Final Independent-Audit Repair Checkpoint — 2026-08-27
+
+> This checkpoint supersedes older `Exact Next Step` notes above for the current migrated source state.
+
+### DONE
+- Independent Claude audit finding H1 (manual/ad-hoc command overlap with Core-owned mission) was cross-checked against source and repaired.
+- Independent audit finding M1 (authority rollout relying on implicit default SITL profile) was repaired fail-closed.
+- Manual command ownership now has two layers: frontend/operator-path guard plus Go API authority guard.
+- Core mission and Go Swarm/RETURN navigation are mutually exclusive: `StartMission` rejects while swarm/return navigation is busy, and Swarm START rejects while a Core mission owns navigation.
+- Operator takeover paths make the Core run terminal before command execution where appropriate (HOLD/STOP/LAND/RTL/DISARM/KILL/altitude takeover).
+- Non-takeover commands that could overlap active mission authority are rejected (GOTO/RC MOVE/MODE/ARM/TAKEOFF/Swarm START).
+- Stale queued Python GOTO/RC callbacks are suppressed while Core authority is active.
+- Selected Drone Card, Cockpit, Field Tablet, leader-mode and direct Go API paths were included in the ownership sweep.
+
+### AUDIT FINDINGS STATUS
+- H1: **CLOSED / VERIFIED BY TESTS**
+- M1: **CLOSED / VERIFIED BY TESTS**
+- P1 failsafe GOTO/HOLD suppression: **INTENTIONAL SAFETY IMPROVEMENT — keep**
+- MT1/MT2/MT3 manual takeover/overlap coverage: **ADDED**, with additional Swarm/RETURN mutual-exclusion coverage.
+
+### FINAL TEST RESULTS
+- Targeted Go (`internal/api`, `internal/mission`, `internal/command`, `internal/swarm`): **PASS**
+- Targeted frontend mission-authority suite: **33/33 PASS**
+- Full Go regression: `go test ./...` = **PASS all packages**
+- Go static verification: `go vet ./...` = **PASS**
+- Full frontend regression: `python -m pytest -q tests` = **1002/1002 PASS in 813.44s (0:13:33)**
+- Final frontend task id: `f5f4328a-323d-435b-a0f3-533ffcdd6cee`, exit code 0.
+
+### MIGRATION/GATE STATUS AFTER REPAIR
+- Software no-dual-authority checkpoint: **VERIFIED PASS for currently migrated authority scope and audited manual/Swarm entrypoints**.
+- F6/F8 audit gaps caused by H1 are considered closed at software-regression level by the guards/tests above.
+- F9A software/bench preparation remains software-complete.
+- F9B actual physical FC verification remains **PENDING ACTUAL FC**.
+- F10 real-flight verification remains **LOCKED** until required hardware evidence exists.
+
+### SAFE-RUNNABLE / NEXT STEP
+- Current source is software-regression green and suitable for continued SITL/software work.
+- Do **not** claim physical-flight readiness from these tests.
+- Exact next hardware gate is **F9B actual FC bench verification** using the existing guarded bench procedure/evidence tooling.
+- After F9B evidence passes, evaluate the F10 gate separately; do not auto-promote F10.

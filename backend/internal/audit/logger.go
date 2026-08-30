@@ -105,6 +105,34 @@ func (l *Logger) Request(requestID string, droneID uint32, command, outcome stri
 	})
 }
 
+// Correlation records the end-to-end V3-S08 identity attached by CommandGateway
+// together with the Core request/result fields needed to join one frontend
+// attempt deterministically to request-level idempotency audit. These fields are
+// observability only: they never participate in authorization, safety, ownership,
+// ordering, or dedup decisions.
+func (l *Logger) Correlation(operationID, commandID, attemptID, rpcMethod,
+	requestID, command, outcome string, ok bool, handlerError string) {
+	if l == nil || (operationID == "" && commandID == "" && attemptID == "") {
+		return
+	}
+	entry := map[string]any{
+		"ts":           nowISO(),
+		"type":         "command_correlation",
+		"operation_id": operationID,
+		"command_id":   commandID,
+		"attempt_id":   attemptID,
+		"rpc_method":   rpcMethod,
+		"request_id":   requestID,
+		"command":      command,
+		"outcome":      outcome,
+		"allowed":      ok,
+	}
+	if handlerError != "" {
+		entry["handler_error"] = handlerError
+	}
+	l.write(entry)
+}
+
 func (l *Logger) write(entry map[string]any) {
 	l.mu.Lock()
 	if err := l.ensureFile(); err != nil {

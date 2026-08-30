@@ -53,6 +53,18 @@ func (s *Service) Idempotent(requestID string, droneID uint32, fn func() *pb.Com
 	return res
 }
 
+// RecordCorrelation writes the frontend CommandGateway identity plus the final
+// request/result linkage at the Core RPC boundary. It is observability-only and
+// cannot authorize, suppress, preempt, or otherwise influence command execution.
+func (s *Service) RecordCorrelation(operationID, commandID, attemptID, rpcMethod,
+	requestID, command, outcome string, ok bool, handlerError string) {
+	if s == nil || s.audit == nil {
+		return
+	}
+	s.audit.Correlation(operationID, commandID, attemptID, rpcMethod,
+		requestID, command, outcome, ok, handlerError)
+}
+
 // ── helpers ────────────────────────────────────────────────
 func res(id uint32, cmd string, ok bool, code int32, msg string) *pb.CommandResult {
 	return &pb.CommandResult{Ok: ok, DroneId: id, Command: cmd, ResultCode: code, Message: msg}
@@ -201,6 +213,20 @@ func (s *Service) waitArmReady(ctx context.Context, d *fleet.Drone) safety.Decis
 	}
 }
 
+// sleepCtx waits for d, or returns early false if ctx is cancelled first.  Used
+// so an operator emergency/takeover that cancels the Takeoff exec context aborts
+// the GUIDED→arm→takeoff sequence promptly instead of sleeping out the delays.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
 // Takeoff = composite: GUIDED → arm → takeoff (safety: alt + arm precondition)
 // TakeoffPrecheck ตรวจเฉพาะด่านที่ไม่เปลี่ยนสถานะ เพื่อให้คำสั่งหลายลำตรวจครบ
 // ทุกลำก่อน ARM ลำแรก. เงื่อนไข transient ยังปล่อยให้ Takeoff รอตามปกติ.
@@ -271,7 +297,9 @@ func (s *Service) Takeoff(ctx context.Context, id uint32, alt float64, confirmed
 	}); err != nil || code != 0 {
 		return res(id, "Takeoff", false, code, "set GUIDED failed")
 	}
-	time.Sleep(400 * time.Millisecond)
+	if !sleepCtx(cctx, 400*time.Millisecond) {
+		return res(id, "Takeoff", false, 0, "takeoff preempted by operator/takeover before arm")
+	}
 
 	// retry arm — EKF/pre-arm ("Need Position Estimate") อาจใช้เวลา ~30-40s หลัง boot
 	var armCode int32 = -1
@@ -284,9 +312,11 @@ func (s *Service) Takeoff(ctx context.Context, id uint32, alt float64, confirmed
 			break
 		}
 		if cctx.Err() != nil {
-			break // หมดงบเวลาแล้ว — เลิก retry
+			break // หมดงบเวลาแล้ว/ถูก preempt — เลิก retry
 		}
-		time.Sleep(2 * time.Second)
+		if !sleepCtx(cctx, 2*time.Second) {
+			break // operator emergency/takeover preempted the sequence
+		}
 	}
 	if armErr != nil || armCode != 0 {
 		reason := fmt.Sprintf("arm rejected by FC after %d attempts (pre-arm not ready)", armAttempts)
@@ -295,7 +325,9 @@ func (s *Service) Takeoff(ctx context.Context, id uint32, alt float64, confirmed
 		}
 		return res(id, "Takeoff", false, armCode, reason)
 	}
-	time.Sleep(500 * time.Millisecond)
+	if !sleepCtx(cctx, 500*time.Millisecond) {
+		return res(id, "Takeoff", false, 0, "takeoff preempted by operator/takeover after arm")
+	}
 	code, err := step(func(c context.Context) (int32, error) {
 		return d.Takeoff(c, alt)
 	})
@@ -363,6 +395,24 @@ func (s *Service) RTL(ctx context.Context, id uint32) *pb.CommandResult {
 	return s.ackResult(id, "RTL", code, err)
 }
 
+// MissionReturnRTL is the normal post-mission Return command. Unlike an
+// explicit operator RTL, it must yield when fleet/FC failsafe already owns the
+// safety flight action, preventing two automatic authorities from competing.
+func (s *Service) MissionReturnRTL(ctx context.Context, id uint32) *pb.CommandResult {
+	if s.mgr.FailsafeActive(id) {
+		return s.reject(id, "MissionReturnRTL", "failsafe active — fleet/FC owns Return action")
+	}
+	// The early precheck rejects the common case, but a failsafe can still latch
+	// between it and conn.Send. Compose the fleet failsafe final-write boundary with
+	// the Return lease/cancellation guard already on ctx, so an automatic Return RTL
+	// that lost the race can never reach the FC after fleet/FC acquired failsafe
+	// ownership. fleet.sendCmd keeps the COMMAND_ACK wait outside fsMu. This is the
+	// automatic-Return policy only: explicit operator RTL (s.RTL called directly)
+	// stays unguarded here by design.
+	ctx = s.mgr.WithFailsafeSendGuard(ctx, id)
+	return s.RTL(ctx, id)
+}
+
 const maxManualYawRateDeg = 90.0
 const manualProjectionSec = 2.0
 
@@ -385,7 +435,7 @@ func (s *Service) RcMove(ctx context.Context, id uint32, dir pb.RcDirection, spe
 		return s.reject(id, "RcMove", "manual movement requires GUIDED mode")
 	}
 	if dec := s.env.CheckManualState(st); !dec.Allow {
-		_ = d.MoveVelocity(0, 0, 0, 0)
+		_ = d.MoveVelocityContext(ctx, 0, 0, 0, 0)
 		return s.reject(id, "RcMove", dec.Reason)
 	}
 
@@ -437,7 +487,7 @@ func (s *Service) RcMove(ctx context.Context, id uint32, dir pb.RcDirection, spe
 		}
 	}
 
-	if err := d.MoveVelocity(vx, vy, vz, yr); err != nil {
+	if err := d.MoveVelocityContext(ctx, vx, vy, vz, yr); err != nil {
 		s.audit.Command(id, "RcMove", true, "send error: "+err.Error(), -1)
 		return res(id, "RcMove", false, -1, err.Error())
 	}
@@ -454,7 +504,7 @@ func (s *Service) Stop(ctx context.Context, id uint32) *pb.CommandResult {
 	if rej != nil {
 		return rej
 	}
-	if err := d.MoveVelocity(0, 0, 0, 0); err != nil {
+	if err := d.MoveVelocityContext(ctx, 0, 0, 0, 0); err != nil {
 		s.audit.Command(id, "StopAll", true, "zero velocity send error: "+err.Error(), -1)
 		return res(id, "StopAll", false, -1, err.Error())
 	}
@@ -505,6 +555,22 @@ func (s *Service) Hold(ctx context.Context, id uint32) *pb.CommandResult {
 	if rej != nil {
 		return rej
 	}
+	// Battery-critical / link-lost failsafe already owns the aircraft (RTL).
+	// WAIT/Cancel/Quick-HOLD callers must never switch mode or send a position
+	// hold after the failsafe latch has won the race.
+	if s.mgr.FailsafeActive(id) {
+		return s.reject(id, "Hold", "failsafe active — refuse HOLD")
+	}
+	// Preemption guard: a Core mission HOLD preempted by an operator takeover must
+	// not switch mode / write a position hold after the takeover has won.
+	if ctx != nil && ctx.Err() != nil {
+		return s.reject(id, "Hold", "preempted — command cancelled before send")
+	}
+	// Compose the fleet failsafe latch with any existing mission/operator
+	// final-write guard. Every SetMode/velocity/position transport write below
+	// re-enters this boundary independently, while SetMode's ACK wait remains
+	// outside fsMu inside fleet.sendCmd.
+	ctx = s.mgr.WithFailsafeSendGuard(ctx, id)
 	st := d.SafetyState()
 	if !st.Armed {
 		// อยู่บนพื้น/ยังไม่ armed — ไม่มีอะไรให้ค้าง และห้ามไปยุ่งกับโหมด
@@ -528,7 +594,7 @@ func (s *Service) Hold(ctx context.Context, id uint32) *pb.CommandResult {
 	//      - ความสูงต่ำ/ไม่น่าเชื่อถือ → ตรึงแล้วจะกลายเป็นสั่งลดระดับ (ดู minHoldAltM)
 	noFix := st.Lat == 0 && st.Lon == 0
 	if noFix || st.AltRel < minHoldAltM {
-		if err := d.MoveVelocity(0, 0, 0, 0); err != nil {
+		if err := d.MoveVelocityContext(ctx, 0, 0, 0, 0); err != nil {
 			s.audit.Command(id, "Hold", true, "send error: "+err.Error(), -1)
 			return res(id, "Hold", false, -1, err.Error())
 		}
@@ -546,7 +612,7 @@ func (s *Service) Hold(ctx context.Context, id uint32) *pb.CommandResult {
 	}
 
 	// 3) ตรึงพิกัด+ความสูงปัจจุบัน
-	if err := d.Goto(st.Lat, st.Lon, st.AltRel); err != nil {
+	if err := d.GotoContext(ctx, st.Lat, st.Lon, st.AltRel); err != nil {
 		s.audit.Command(id, "Hold", true, "send error: "+err.Error(), -1)
 		return res(id, "Hold", false, -1, err.Error())
 	}
@@ -562,11 +628,27 @@ func (s *Service) Goto(ctx context.Context, id uint32, lat, lon, alt float64) *p
 	if rej != nil {
 		return rej
 	}
+	// Battery-critical / link-lost failsafe already owns the aircraft (RTL).
+	// Reject every later GOTO source centrally so mission/manual callers cannot
+	// race the event observer and overwrite that higher-priority safety action.
+	if s.mgr.FailsafeActive(id) {
+		return s.reject(id, "Goto", "failsafe active — refuse GOTO")
+	}
 	others := s.mgr.OtherSafetyStates(id)
 	if dec := s.env.CheckGoto(d.SafetyState(), lat, lon, alt, others); !dec.Allow {
 		return s.reject(id, "Goto", dec.Reason)
 	}
-	if err := d.Goto(lat, lon, alt); err != nil {
+	// Preemption guard: if an operator emergency/takeover cancelled this send's
+	// context (e.g. a Core mission GOTO preempted by a takeover), refuse before
+	// writing to the FC so a stale/superseded GOTO can never reach the aircraft.
+	if ctx != nil && ctx.Err() != nil {
+		return s.reject(id, "Goto", "preempted — command cancelled before send")
+	}
+	// The earlier FailsafeActive precheck rejects the common case; this context
+	// guard closes the TOCTOU window between that check and the actual MAVLink
+	// transport write while preserving any mission/operator cancellation guard.
+	ctx = s.mgr.WithFailsafeSendGuard(ctx, id)
+	if err := d.GotoContext(ctx, lat, lon, alt); err != nil {
 		s.audit.Command(id, "Goto", true, "send error: "+err.Error(), -1)
 		return res(id, "Goto", false, -1, err.Error())
 	}
@@ -592,7 +674,7 @@ func (s *Service) ChangeAlt(ctx context.Context, id uint32, alt float64) *pb.Com
 	if st.Lat == 0 && st.Lon == 0 {
 		return s.reject(id, "ChangeAlt", "no position")
 	}
-	if err := d.Goto(st.Lat, st.Lon, alt); err != nil {
+	if err := d.GotoContext(ctx, st.Lat, st.Lon, alt); err != nil {
 		return res(id, "ChangeAlt", false, -1, err.Error())
 	}
 	msg := fmt.Sprintf("alt -> %.0fm", alt)

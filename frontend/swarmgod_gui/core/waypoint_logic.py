@@ -207,6 +207,78 @@ def waypoint_swarm_targets(positions: Dict[int, Tuple[float, float]],
         positions, wp_lat, wp_lon, keep_formation=keep_formation)
 
 
+
+def grouped_goto_order(ids: Iterable[int],
+                       positions: Dict[int, Tuple[float, float]],
+                       wp_lat: float, wp_lon: float) -> List[int]:
+    """Legacy front-of-travel dispatch order used by app.py.
+
+    Only drones with a known position participate in movement_order; missing
+    participants are appended in caller order.
+    """
+    ordered_ids = [int(x) for x in ids]
+    if len(ordered_ids) <= 1 or not positions:
+        return ordered_ids
+    known = {int(d): (float(p[0]), float(p[1]))
+             for d, p in positions.items() if int(d) in ordered_ids}
+    if not known:
+        return ordered_ids
+    clat = sum(p[0] for p in known.values()) / len(known)
+    clon = sum(p[1] for p in known.values()) / len(known)
+    dlat, dlon = float(wp_lat) - clat, float(wp_lon) - clon
+    if abs(dlat) < 1e-9 and abs(dlon) < 1e-9:
+        return ordered_ids
+    if abs(dlon) >= abs(dlat):
+        direction = swarm_logic.DIR_RIGHT if dlon > 0 else swarm_logic.DIR_LEFT
+    else:
+        direction = swarm_logic.DIR_FWD if dlat > 0 else swarm_logic.DIR_BWD
+    xy = {d: (p[1], p[0]) for d, p in known.items()}
+    front = swarm_logic.movement_order(xy, direction)
+    return front + [d for d in ordered_ids if d not in front]
+
+
+def grouped_dispatch_plan(ids: Iterable[int],
+                          positions: Dict[int, Tuple[float, float]],
+                          wp_lat: float, wp_lon: float
+                          ) -> Tuple[Dict[int, Tuple[float, float]], List[int]]:
+    """Return the exact Legacy GROUPED targets and 150ms dispatch order."""
+    ordered_ids = [int(x) for x in ids]
+    known = {int(d): (float(p[0]), float(p[1]))
+             for d, p in positions.items() if int(d) in ordered_ids}
+    targets = waypoint_swarm_targets(
+        known, float(wp_lat), float(wp_lon), keep_formation=True)
+    for drone_id in ordered_ids:
+        targets.setdefault(drone_id, (float(wp_lat), float(wp_lon)))
+    return targets, grouped_goto_order(ordered_ids, known, wp_lat, wp_lon)
+
+
+def grouped_arrival_update(arrived: Iterable[int], participants: Iterable[int],
+                           drone_id: int) -> Tuple[set, bool, bool]:
+    """Apply the production GROUPED arrival barrier bookkeeping.
+
+    Returns (new_arrived, complete, accepted). A rejection/non-arrival never calls
+    this helper, so it cannot advance the barrier; unknown drone events are ignored.
+    """
+    required = {int(x) for x in participants}
+    new_arrived = {int(x) for x in arrived}
+    drone_id = int(drone_id)
+    if drone_id not in required:
+        return new_arrived, False, False
+    new_arrived.add(drone_id)
+    return new_arrived, new_arrived >= required, True
+
+
+def grouped_dispatch_generation_valid(waypoint_executing: bool,
+                                      wave_executing: bool,
+                                      scheduled_generation: int,
+                                      current_generation: int) -> bool:
+    """Legacy QTimer guard: normal waypoint callbacks remain valid; stale WAVE
+    callbacks are suppressed after generation changes."""
+    return bool(waypoint_executing) and (
+        not bool(wave_executing)
+        or int(scheduled_generation) == int(current_generation))
+
+
 # ══════════════════════════════════════════════════════════════
 #  ตรวจการชนของเส้นทางก่อนสั่งบิน (โหมด SEPARATE)
 #  "ห้ามสั่งให้ไปเลย — คำนวณก่อนว่าโดรนระดับเดียวกันไหม เดี๋ยวจะชนกัน"
