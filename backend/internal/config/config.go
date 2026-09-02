@@ -58,7 +58,7 @@ type Config struct {
 	DBPath   string // ไฟล์ SQLite (users/registry/sessions/audit index) — spec §3.4
 
 	// ── Profile ──
-	Profile string // sitl | hil | production (spec §17)
+	Profile string // sitl | setup | hil | production (spec §17)
 }
 
 // Default = ค่าปลอดภัยตั้งต้น (ตรงกับที่ระบุใน SECURITY.md)
@@ -145,11 +145,15 @@ func Load() Config {
 func (c Config) Validate() error {
 	profile := strings.ToLower(strings.TrimSpace(c.Profile))
 	switch profile {
-	case "sitl", "hil", "production":
+	case "sitl", "setup", "hil", "production":
 	default:
-		return fmt.Errorf("unknown SWARMGOD_PROFILE %q (want sitl, hil, or production)", c.Profile)
+		return fmt.Errorf("unknown SWARMGOD_PROFILE %q (want sitl, setup, hil, or production)", c.Profile)
 	}
-	if profile != "sitl" && !c.HomeExplicit {
+	// setup is the real-aircraft telemetry-only bootstrap profile. It deliberately
+	// allows Core/UI startup before a field Home is known; flight-mutating RPCs
+	// and background command writers are blocked elsewhere until Core restarts in
+	// hil/production with an explicit SWARMGOD_HOME_LOC.
+	if profile != "sitl" && profile != "setup" && !c.HomeExplicit {
 		return fmt.Errorf("%s requires explicit SWARMGOD_HOME_LOC (lat,lon,alt,heading)", profile)
 	}
 	if profile == "production" {
@@ -168,6 +172,13 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// TelemetryOnly is true only for the real-aircraft setup bootstrap profile.
+// Callers use it to suppress every background/automatic FC write while still
+// allowing the operator to connect and inspect telemetry before choosing Home.
+func (c Config) TelemetryOnly() bool {
+	return strings.EqualFold(strings.TrimSpace(c.Profile), "setup")
 }
 
 // Snapshot คืนค่า config เป็น map[string]string สำหรับคำนวณ config hash (spec §17)

@@ -172,12 +172,12 @@ func TestCorrelationRequestCanJoinIdempotentReplayAudit(t *testing.T) {
 	}
 }
 
-func TestAuthInterceptorRemainsBeforeCorrelation(t *testing.T) {
+func TestAuthAndSetupSafetyRemainBeforeCorrelation(t *testing.T) {
 	b, err := os.ReadFile("server.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), "grpc.ChainUnaryInterceptor(s.auth.unary(), s.correlationAuditUnary())") {
-		t.Fatal("auth must remain before correlation in the unary interceptor chain")
+	if !strings.Contains(string(b), "grpc.ChainUnaryInterceptor(s.auth.unary(), s.setupSafetyUnary(), s.correlationAuditUnary())") {
+		t.Fatal("auth and setup safety must remain before correlation in the unary interceptor chain")
 	}
 }

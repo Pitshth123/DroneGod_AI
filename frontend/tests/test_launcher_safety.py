@@ -19,10 +19,17 @@ class TestRealDroneLauncherSafety(unittest.TestCase):
         run.assert_called_once()
         self.assertIn("build", run.call_args.args[0])
 
-    def test_real_mode_requires_explicit_home(self):
-        with mock.patch.dict(os.environ, {"SWARMGOD_PROFILE": "hil"}, clear=True):
-            with self.assertRaisesRegex(RuntimeError, "SWARMGOD_HOME_LOC"):
-                Launcher(use_sitl=False)._core_runtime_env()
+    def test_real_mode_without_home_enters_telemetry_only_setup(self):
+        env = {
+            "SWARMGOD_PROFILE": "hil",
+            "SWARMGOD_MISSION_AUTHORITY": "core-single",
+            "SWARMGOD_BENCH_CONFIRM": "PROPS-REMOVED-BENCH",
+        }
+        with mock.patch.dict(os.environ, env, clear=True):
+            got = Launcher(use_sitl=False)._core_runtime_env()
+        self.assertEqual(got["SWARMGOD_PROFILE"], "setup")
+        self.assertNotIn("SWARMGOD_MISSION_AUTHORITY", got)
+        self.assertNotIn("SWARMGOD_BENCH_CONFIRM", got)
 
     def test_production_requires_session_token(self):
         env = {

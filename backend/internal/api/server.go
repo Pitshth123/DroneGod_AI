@@ -16,7 +16,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 
 	pb "github.com/swarmgod/backend/gen/swarmgod/v1"
 	"github.com/swarmgod/backend/internal/command"
@@ -582,6 +584,37 @@ func aggregate(cmd, reqID string, results []*pb.CommandResult) *pb.CommandResult
 	return top
 }
 
+func setupAllowedUnaryMethod(fullMethod string) bool {
+	switch fullMethod {
+	case "/swarmgod.v1.SwarmGodService/Connect",
+		"/swarmgod.v1.SwarmGodService/Disconnect",
+		"/swarmgod.v1.SwarmGodService/GetFleetSnapshot",
+		"/swarmgod.v1.SwarmGodService/GetMissionState",
+		"/swarmgod.v1.SwarmGodService/ParamGet",
+		"/swarmgod.v1.SwarmGodService/ParamList",
+		"/swarmgod.v1.SwarmGodService/GetSwarmState":
+		return true
+	default:
+		return false
+	}
+}
+
+// setupSafetyUnary makes the real-aircraft bootstrap profile fail closed at the
+// RPC boundary. setup exists only so the operator can open the UI, connect the
+// FC, and inspect telemetry/GPS before choosing a real field Home. No flight,
+// mission, swarm, payload, geofence, parameter-write, or mode-changing RPC may
+// execute until Core restarts in hil/production with explicit HOME configuration.
+func (s *Server) setupSafetyUnary() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler) (any, error) {
+		if s != nil && s.cfg.TelemetryOnly() && !setupAllowedUnaryMethod(info.FullMethod) {
+			return nil, status.Error(codes.FailedPrecondition,
+				"setup profile is telemetry-only; set SWARMGOD_HOME_LOC and restart Core in hil/production before flight commands")
+		}
+		return handler(ctx, req)
+	}
+}
+
 // Serve เปิด gRPC listener (บล็อกจน ctx ยกเลิก)
 // Phase 1: plaintext localhost + warning; Phase 6: mTLS (ดู SECURITY.md)
 func (s *Server) Serve(ctx context.Context) error {
@@ -601,9 +634,10 @@ func (s *Server) Serve(ctx context.Context) error {
 		return err
 	}
 	opts = append(opts,
-		// Auth remains first/fail-closed. Correlation audit runs only after auth
-		// admits the unary RPC and is observe-only; it cannot alter command policy.
-		grpc.ChainUnaryInterceptor(s.auth.unary(), s.correlationAuditUnary()),
+		// Auth remains first/fail-closed. setupSafetyUnary is the real-aircraft
+		// telemetry-only bootstrap gate and runs before any command handler/audit.
+		// Correlation remains observe-only after both authorization gates admit RPC.
+		grpc.ChainUnaryInterceptor(s.auth.unary(), s.setupSafetyUnary(), s.correlationAuditUnary()),
 		grpc.ChainStreamInterceptor(s.auth.stream()),
 	)
 	gs := grpc.NewServer(opts...)

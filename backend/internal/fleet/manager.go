@@ -123,8 +123,11 @@ func (m *Manager) Connect(parent context.Context, id uint32, name, proto, host s
 		log.Printf("[fleet] Drone %d reader stopped", id)
 	}()
 	// อุ่นช่องทาง RC override ไว้ก่อน — แก้อาการ "คำสั่งแรกหลังเชื่อมต่อถูกเมินหลายวินาที"
-	// ส่งแบบ "ปล่อยทุกช่อง" จึงไม่แตะการควบคุม (ดู Drone.RCWarmup)
-	go d.RCWarmup(ctx)
+	// แต่ setup profile ต้องเป็น telemetry-only จริง จึงห้ามส่ง RC override แม้จะเป็น
+	// ค่า "ปล่อยทุกช่อง"; การ warmup จะเริ่มได้ก็ต่อเมื่อ Core รันใน hil/production/sitl.
+	if !m.cfg.TelemetryOnly() {
+		go d.RCWarmup(ctx)
+	}
 	return nil
 }
 

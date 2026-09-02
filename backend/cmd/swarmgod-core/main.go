@@ -69,8 +69,12 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go mgr.Run(ctx)         // telemetry broadcast ticker
-	go mgr.RunFailsafe(ctx) // link-loss + battery failsafe
+	go mgr.Run(ctx) // telemetry broadcast ticker
+	if !cfg.TelemetryOnly() {
+		go mgr.RunFailsafe(ctx) // link-loss + battery failsafe; setup must never emit automatic flight commands
+	} else {
+		log.Printf("[core] setup profile: telemetry-only bootstrap; automatic failsafe command loop disabled")
+	}
 	go mgr.RunRegistry(ctx) // vehicle registry reconcile (best-effort)
 
 	srv := api.New(ctx, cfg, mgr, agg, cmdSvc, sw, bus, st)

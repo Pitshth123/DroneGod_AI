@@ -190,10 +190,19 @@ class Launcher(QThread):
             return env
 
         profile = env.get("SWARMGOD_PROFILE", "production").strip().lower()
-        if profile not in ("hil", "production"):
-            raise RuntimeError("โหมดโดรนจริงอนุญาต SWARMGOD_PROFILE=hil หรือ production เท่านั้น")
+        if profile not in ("setup", "hil", "production"):
+            raise RuntimeError("โหมดโดรนจริงอนุญาต SWARMGOD_PROFILE=setup, hil หรือ production เท่านั้น")
+
+        # First-start chicken-and-egg fix: the operator may need telemetry/GPS
+        # from the actual FC before a real field Home is known. Start Core in the
+        # fail-closed setup profile instead of refusing to open the UI. Core setup
+        # permits connect/read-only telemetry but rejects every flight-mutating RPC.
         if not env.get("SWARMGOD_HOME_LOC", "").strip():
-            raise RuntimeError("โหมดโดรนจริงต้องตั้ง SWARMGOD_HOME_LOC เป็นพิกัดฐานจริง")
+            env["SWARMGOD_PROFILE"] = "setup"
+            env.pop("SWARMGOD_MISSION_AUTHORITY", None)
+            env.pop("SWARMGOD_BENCH_CONFIRM", None)
+            return env
+
         env["SWARMGOD_PROFILE"] = profile
         if profile == "production":
             env["SWARMGOD_MAVLINK_STRICT"] = "1"

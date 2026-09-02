@@ -53,6 +53,24 @@ func TestInvalidHomeLocationKeepsSafeDefault(t *testing.T) {
 	}
 }
 
+func TestSetupProfileAllowsTelemetryBootstrapWithoutExplicitHome(t *testing.T) {
+	cfg := Default()
+	cfg.Profile = "setup"
+	if cfg.HomeExplicit {
+		t.Fatal("precondition: default home must not count as explicit field home")
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("setup telemetry bootstrap must start without explicit home: %v", err)
+	}
+	if !cfg.TelemetryOnly() {
+		t.Fatal("setup profile must suppress automatic/background FC writes")
+	}
+	cfg.Profile = "hil"
+	if cfg.TelemetryOnly() {
+		t.Fatal("hil must not be classified as telemetry-only")
+	}
+}
+
 func TestProductionRequiresExplicitHome(t *testing.T) {
 	cfg := Default()
 	cfg.Profile = "production"
