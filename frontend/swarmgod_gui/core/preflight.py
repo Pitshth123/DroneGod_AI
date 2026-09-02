@@ -104,12 +104,15 @@ def evaluate_static(snap: dict) -> List[CheckResult]:
 
     profile = (snap.get("profile") or "").lower()
     real = profile in ("production", "hil")
+    setup = profile == "setup"
     core_bits = ["mTLS" if snap.get("mtls") else "insecure",
                  "token" if snap.get("token") else "no-token",
                  "profile=" + (profile or "ไม่ระบุ")]
     core_bad = []
     if not snap.get("mtls"):
         core_bad.append("ช่อง gRPC ไม่ได้เข้ารหัส (ไม่มี cert)")
+    if setup:
+        core_bad.append("โหมด SETUP อ่าน telemetry ได้เท่านั้น — ตั้ง SWARMGOD_HOME_LOC แล้ว restart Core ก่อนบิน")
     if real and not snap.get("token"):
         core_bad.append("โหมดบินจริงต้องมี SWARMGOD_TOKEN")
     if real and not snap.get("home_loc"):

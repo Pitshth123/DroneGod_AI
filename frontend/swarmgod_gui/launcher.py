@@ -233,7 +233,11 @@ class Launcher(QThread):
             self._emit(i, "fail", "core ไม่ตอบที่ :50051")
             raise RuntimeError("core did not start")
         profile = self.runtime_env.get("SWARMGOD_PROFILE", "sitl")
-        self._emit(i, "ok", f"gRPC :50051 [{profile} · mTLS + signing]")
+        if profile == "setup":
+            self._emit(i, "ok", "gRPC :50051 [setup · telemetry-only · ตั้ง HOME แล้ว restart ก่อนบิน]")
+            self.log.emit("ยังไม่มี SWARMGOD_HOME_LOC — เปิด Core แบบ SETUP เพื่อ Connect/อ่าน telemetry/GPS เท่านั้น")
+        else:
+            self._emit(i, "ok", f"gRPC :50051 [{profile} · mTLS + signing]")
 
     def _check_sitl_built(self):
         """เช็คว่ามี arducopter ที่ build แล้วใน WSL — คืน (ok, เหตุผล)

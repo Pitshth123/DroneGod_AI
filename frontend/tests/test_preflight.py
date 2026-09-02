@@ -111,6 +111,13 @@ class TestStaticChecks(unittest.TestCase):
         res = _by_key(pf.evaluate_static(_snap(token=False, profile="sitl")))
         self.assertEqual(res["link.core"].status, pf.PASS)
 
+    def test_setup_profile_is_telemetry_only_and_blocks_preflight(self):
+        res = _by_key(pf.evaluate_static(_snap(profile="setup", token=False, home_loc=False)))
+        self.assertEqual(res["link.core"].status, pf.FAIL)
+        self.assertTrue(res["link.core"].blocking)
+        self.assertIn("telemetry", res["link.core"].detail.lower())
+        self.assertIn("SWARMGOD_HOME_LOC", res["link.core"].detail)
+
     def test_close_pair_blocks_but_warn_pair_does_not(self):
         two = [_drone(1), _drone(2)]
         res = _by_key(pf.evaluate_static(
