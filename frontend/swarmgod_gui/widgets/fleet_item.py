@@ -18,6 +18,7 @@ from ..core.theme import (
 )
 from ..core import rpc
 from ..core.ip_scan import split_host_port
+from .controls import AccordionSection
 
 _ASSETS = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
 _DRONE_IMG = os.path.join(_ASSETS, "drone_hero.png")
@@ -446,17 +447,18 @@ class SelectedDroneCard(QFrame):
         sv.addLayout(grid)
         v.addWidget(status_wrap)
 
-        # IP: host เต็มแถว → port + OK แถวถัดไป (เห็น IP ครบ) — ตามด้วยสถานะตามที่สั่ง
+        # Connection/maintenance ไม่จำเป็นต้องกินพื้นที่ตลอดเวลา — พับไว้โดยคง widget/signal เดิมครบ
+        self.conn_section = AccordionSection("CONNECTION & APPEARANCE", accent=T("dim"), expanded=False)
         ip_lab = QLabel("IP ADDRESS")
         ip_lab.setStyleSheet(
             f"color:{T('faint')}; font-size:10px; font-weight:600; letter-spacing:0.8px;")
-        v.addWidget(ip_lab)
+        self.conn_section.add_widget(ip_lab)
         self.ed_host = QLineEdit()
         self.ed_host.setPlaceholderText("192.168.1.100")
         self.ed_host.setMinimumHeight(28)
         self.ed_host.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.ed_host.setStyleSheet(self._ip_edit_qss())
-        v.addWidget(self.ed_host)
+        self.conn_section.add_widget(self.ed_host)
 
         port_row = QHBoxLayout()
         port_row.setSpacing(4)
@@ -477,7 +479,7 @@ class SelectedDroneCard(QFrame):
         self.btn_apply_ip.setStyleSheet(ghost_btn(radius=5, font=9))
         self.btn_apply_ip.clicked.connect(self._emit_apply_ip)
         port_row.addWidget(self.btn_apply_ip)
-        v.addLayout(port_row)
+        self.conn_section.add_layout(port_row)
 
         # ปุ่มลิงก์ — กว้างเท่ากัน ไม่ล้นขอบ
         link_row = QHBoxLayout()
@@ -498,7 +500,7 @@ class SelectedDroneCard(QFrame):
         link_row.addWidget(self.btn_connect, 1)
         link_row.addWidget(self.btn_disconnect, 1)
         link_row.addWidget(self.btn_delete, 1)
-        v.addLayout(link_row)
+        self.conn_section.add_layout(link_row)
 
         # color
         crow = QHBoxLayout()
@@ -517,8 +519,9 @@ class SelectedDroneCard(QFrame):
             crow.addWidget(b)
             self._color_btns.append(b)
         crow.addStretch(1)
-        v.addLayout(crow)
+        self.conn_section.add_layout(crow)
         self._refresh_swatches()
+        v.addWidget(self.conn_section)
 
         # ── พารามิเตอร์รายลำ: ความสูง takeoff + ระยะห่าง (ย้ายมาจาก Right Panel) ──
         # ป้ายกำกับเป็นอังกฤษล้วน — คำอธิบายเต็มอยู่ใน tooltip แทน (ไม่เอาไทยขึ้นบนตัวควบคุม)

@@ -1665,13 +1665,11 @@ class GroundStation(QMainWindow):
 
     def _sec_flight(self):
         sec = AccordionSection("FLIGHT", accent=T("green"), expanded=True)
-        tl = QLabel("TARGET")
+
+        # คำสั่งที่ใช้ระหว่างบินจริงอยู่ชั้นแรกทั้งหมด — ไม่ต้องกางเมนูเพิ่ม
+        tl = QLabel("QUICK FLIGHT")
         tl.setStyleSheet(section_label_qss())
         sec.add_widget(tl)
-        # ไม่มีสวิตช์ Selected/Fleet แล้ว — เป้าหมาย = ลำที่เลือกจากการ์ดฝั่งซ้าย
-        # (Ctrl+Click เลือกหลายลำ) หรือกดปุ่ม FLEET ในแผง Take off เพื่อเลือกทุกลำ
-
-        # ปุ่มหลัก: โลโก้ + ข้อความ โทนเดียว
         g = QGridLayout()
         g.setSpacing(6)
         g.addWidget(self._flight_btn("▶", "ARM", self._cmd_arm, primary=True), 0, 0)
@@ -1681,22 +1679,9 @@ class GroundStation(QMainWindow):
         g.addWidget(self._flight_btn("❚❚", "HOLD", self._cmd_hold), 2, 0, 1, 2)
         sec.add_layout(g)
 
-        # ── SERVO A/B (ปล่อยของ) — ฝั่งขวาของหมวด FLIGHT · spec: servo.md ──
-        sl = QLabel("SERVO")
-        sl.setStyleSheet(section_label_qss())
-        sec.add_widget(sl)
-        srow = QHBoxLayout()
-        srow.setSpacing(8)
-        self.btn_servo_a = self._servo_btn("A", T("red"))
-        self.btn_servo_b = self._servo_btn("B", T("yellow"))
-        srow.addWidget(self.btn_servo_a, 1)      # แบ่งความกว้างเท่ากัน แถวเดียวกัน
-        srow.addWidget(self.btn_servo_b, 1)
-        sec.add_layout(srow)
-
-        self.sf_takeoff = SliderField("DEFAULT TAKEOFF ALTITUDE", 1, 120, 20, 1, "m", 0, T("accent"))
+        # TAKEOFF เป็น workflow หลัก จึงคงไว้ชั้นแรก แต่ตัด label ที่ซ้ำกันออก
+        self.sf_takeoff = SliderField("TAKEOFF ALTITUDE", 1, 120, 20, 1, "m", 0, T("accent"))
         sec.add_widget(self.sf_takeoff)
-
-        # แผง Take off: โหมด All/Sequential + ปุ่ม FLEET (spec 1 + 2)
         self.takeoff_panel = TakeoffPanel(default_alt=20.0)
         self.takeoff_panel.takeoff_requested.connect(self._on_panel_takeoff)
         self.takeoff_panel.fleet_toggled.connect(self._on_fleet_toggled)
@@ -1704,7 +1689,21 @@ class GroundStation(QMainWindow):
         self.sf_takeoff.valueChanged.connect(self.takeoff_panel.set_default_alt)
         sec.add_widget(self.takeoff_panel)
 
-        # ยกเลิกคำสั่งเคลื่อนที่ — จัดกลุ่มไว้กับคำสั่งการบิน (ย้ายมาจาก Top bar)
+        # ของที่ใช้เป็นครั้งคราวย้ายเข้า ADVANCED FLIGHT เพื่อลดความแน่นของหน้า
+        # signal/handler เดิมทั้งหมดคงไว้ — เปลี่ยนเฉพาะ presentation hierarchy
+        advanced = AccordionSection("ADVANCED FLIGHT", accent=T("dim"), expanded=False)
+
+        sl = QLabel("PAYLOAD SERVO")
+        sl.setStyleSheet(section_label_qss())
+        advanced.add_widget(sl)
+        srow = QHBoxLayout()
+        srow.setSpacing(8)
+        self.btn_servo_a = self._servo_btn("A", T("red"))
+        self.btn_servo_b = self._servo_btn("B", T("yellow"))
+        srow.addWidget(self.btn_servo_a, 1)
+        srow.addWidget(self.btn_servo_b, 1)
+        advanced.add_layout(srow)
+
         self.btn_cancel_nav = QPushButton("CANCEL NAV")
         self.btn_cancel_nav.setMinimumHeight(36)
         self.btn_cancel_nav.setCursor(Qt.PointingHandCursor)
@@ -1713,11 +1712,11 @@ class GroundStation(QMainWindow):
             "แล้วให้โดรนหยุดลอยค้างที่เดิม (คงโหมด GUIDED · ความสูงเท่าเดิม ไม่ลดระดับ)")
         self.btn_cancel_nav.setStyleSheet(tinted_btn(T("red"), radius=8, font=11))
         self.btn_cancel_nav.clicked.connect(self._cancel_navigation)
-        sec.add_widget(self.btn_cancel_nav)
+        advanced.add_widget(self.btn_cancel_nav)
 
         ml = QLabel("FLIGHT MODE")
         ml.setStyleSheet(section_label_qss())
-        sec.add_widget(ml)
+        advanced.add_widget(ml)
         gm = QGridLayout()
         gm.setSpacing(6)
         modes = [("Guided", "FLIGHT_MODE_GUIDED"), ("Loiter", "FLIGHT_MODE_LOITER"),
@@ -1725,7 +1724,9 @@ class GroundStation(QMainWindow):
         for i, (label, enum) in enumerate(modes):
             gm.addWidget(self._abtn(label, T("dim"), lambda _, e=enum: self._cmd_mode(e), "ghost"),
                          i // 2, i % 2)
-        sec.add_layout(gm)
+        advanced.add_layout(gm)
+        sec.add_widget(advanced)
+        self.sec_flight_advanced = advanced
         return sec
 
     # ══════════════════════════════════════════════════════════
