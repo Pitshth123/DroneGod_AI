@@ -61,8 +61,9 @@ class TestQuickSetupGroundStation(unittest.TestCase):
         self.win.deleteLater()
         _app.processEvents()
 
-    def test_topbar_exposes_quick_setup(self):
-        self.assertEqual(self.win.btn_quick_setup.text(), "QUICK SETUP")
+    def test_commands_header_exposes_quick_setup(self):
+        self.assertEqual(self.win.btn_quick_setup.text(), "✓ QUICK SETUP")
+        self.assertIsNotNone(self.win.btn_field)
         tip = self.win.btn_quick_setup.toolTip()
         self.assertIn("ไม่ ARM", tip)
         self.assertIn("ไม่ TAKEOFF", tip)
@@ -95,6 +96,11 @@ class TestQuickSetupGroundStation(unittest.TestCase):
         self.assertEqual(self.win.sf_formspeed.value(), 6.0)
         self.assertEqual(self.win.form_picker.current(), 2)
         self.assertEqual(self.win._quick_setup_operation, "formation")
+        plan = self.win._flight_snapshot()
+        self.assertEqual(plan["QUICK SETUP"], "FORMATION · NONE")
+        self.assertEqual(plan["TAKEOFF ALT"], "31 m")
+        self.assertEqual(plan["MISSION SPEED"], "5.5 m/s")
+        self.assertIn("COLUMN", plan["FORMATION"])
         self.assertIsInstance(self.win._preflight, preflight.PreflightState)
         self.assertFalse(self.win._preflight.ready())
 

@@ -588,15 +588,6 @@ class GroundStation(QMainWindow):
         self.pill_link = self._pill("LINK --", T("dim"), compact=True)
         h.addWidget(self.pill_link)
 
-        self.btn_quick_setup = QPushButton("QUICK SETUP")
-        self.btn_quick_setup.setMinimumHeight(32)
-        self.btn_quick_setup.setCursor(Qt.PointingHandCursor)
-        self.btn_quick_setup.setToolTip(
-            "ตั้งค่าแบบเป็นขั้นตอน: Connect → Select → Operation → Configure → Safety → Review\n"
-            "Apply เปลี่ยนเฉพาะค่าบน Cockpit — ไม่ ARM / ไม่ TAKEOFF")
-        self.btn_quick_setup.setStyleSheet(tinted_btn(T("accent"), radius=10, font=10, weight=800))
-        self.btn_quick_setup.clicked.connect(self._open_quick_setup)
-        h.addWidget(self.btn_quick_setup)
         # PREFLIGHT อยู่ข้าง ● ONLINE ในแผง FLEET — ไม่ใส่ตรงนี้
         # กันแถบซ้ายของ topbar ยื่นยาวจนป้ายโหมดกลางไม่สมดุล
         # ปุ่ม LAN อยู่หัวแผง COMMANDS · โหมดการบินเป็นป้ายกลาง (ดู _build_mode_drop)
@@ -767,7 +758,23 @@ class GroundStation(QMainWindow):
             "swarm": "SWARM",
         }.get(self._quick_setup_operation, self._quick_setup_operation.upper())
         targets = ", ".join(f"D{d}" for d in picked) if picked else "NONE"
-        self._summ_set("quick_setup", "QUICK SETUP", f"{op_label} · {targets}")
+        self._summ_batch = True
+        try:
+            self._summ_set("quick_setup", "QUICK SETUP", f"{op_label} · {targets}")
+            self._summ_set("quick_takeoff", "TAKEOFF ALT", f"{float(cfg.get('takeoff_alt', 20.0)):.0f} m")
+            self._summ_set("quick_speed", "MISSION SPEED", f"{float(cfg.get('speed', 3.0)):.1f} m/s")
+            if self._quick_setup_operation in ("formation", "swarm"):
+                form_name = FORMATION_NAMES.get(int(cfg.get("formation", 0)), "-")
+                self._summ_set(
+                    "quick_formation", "FORMATION",
+                    f"{form_name} · spacing {float(cfg.get('spacing', 12.0)):.0f} m · "
+                    f"offset {float(cfg.get('offset', 5.0)):.0f} m · "
+                    f"speed {float(cfg.get('form_speed', 4.0)):.1f} m/s")
+            else:
+                self._summ_remove("quick_formation")
+        finally:
+            self._summ_batch = False
+        self._render_summary()
         self._log(
             f"QUICK SETUP applied · {op_label} · targets={targets} · "
             f"takeoff={float(cfg.get('takeoff_alt', 20.0)):.0f}m",
@@ -1475,6 +1482,20 @@ class GroundStation(QMainWindow):
         hd.addSpacing(6)
         hd.addWidget(self.btn_field)
         self._field_paint()
+
+        # Quick Setup อยู่หัว COMMANDS ข้าง LAN เพื่อรวมเครื่องมือเตรียมงานไว้จุดเดียว
+        # และลดความรกของ top bar หลัก
+        self.btn_quick_setup = QPushButton("✓ QUICK SETUP")
+        self.btn_quick_setup.setFixedHeight(28)
+        self.btn_quick_setup.setCursor(Qt.PointingHandCursor)
+        self.btn_quick_setup.setToolTip(
+            "ตั้งค่าแบบเป็นขั้นตอน: Connect → Select → Operation → Configure → Safety → Review\n"
+            "Apply เปลี่ยนเฉพาะค่าบน Cockpit — ไม่ ARM / ไม่ TAKEOFF")
+        self.btn_quick_setup.setStyleSheet(tinted_btn(T("accent"), radius=8, font=9, weight=800))
+        self.btn_quick_setup.clicked.connect(self._open_quick_setup)
+        hd.addSpacing(6)
+        hd.addWidget(self.btn_quick_setup)
+
         # เมนูไฟล์ตั้งค่า (Save/Export/Load) — ย้ายมาจากแถบซ้าย
         hd.addSpacing(6)
         hd.addWidget(self._build_cfg_button())

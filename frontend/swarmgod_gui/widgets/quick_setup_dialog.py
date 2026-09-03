@@ -8,7 +8,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QStackedWidget,
     QWidget, QFrame, QCheckBox, QButtonGroup, QRadioButton, QDoubleSpinBox,
-    QComboBox, QScrollArea, QSizePolicy,
+    QComboBox, QScrollArea, QSizePolicy, QGridLayout,
 )
 
 from ..core.theme import T, rgba, filled_btn, ghost_btn, tinted_btn
@@ -245,10 +245,73 @@ class QuickSetupDialog(QDialog):
     def _page_review(self):
         w, v = self._page_shell(
             "6 · REVIEW & APPLY",
-            "ตรวจแผนก่อนนำค่ากลับไปใส่หน้า Cockpit เดิม ปุ่ม APPLY ไม่ ARM และไม่ TAKEOFF")
+            "สรุปค่าที่กำลังจะนำกลับไปใช้ใน Cockpit ให้ตรวจแบบภาพรวมก่อน Apply")
+
+        self._review_cards = {}
+        cards = QGridLayout(); cards.setSpacing(8)
+        for i, (key, title) in enumerate([
+                ("targets", "DRONES"), ("operation", "OPERATION"),
+                ("takeoff", "TAKEOFF ALT"), ("speed", "MISSION SPEED")]):
+            card = QFrame()
+            card.setStyleSheet(
+                f"background:{rgba('#ffffff', 0.045)}; border:1px solid {rgba('#ffffff', 0.08)};"
+                " border-radius:10px;")
+            cv = QVBoxLayout(card); cv.setContentsMargins(12, 9, 12, 9); cv.setSpacing(3)
+            cap = QLabel(title)
+            cap.setStyleSheet(f"color:{T('faint')}; font-size:9px; font-weight:800; letter-spacing:0.8px;")
+            val = QLabel("-")
+            val.setWordWrap(True)
+            val.setStyleSheet(f"color:{T('text')}; font-size:16px; font-weight:900;")
+            cv.addWidget(cap); cv.addWidget(val)
+            cards.addWidget(card, i // 2, i % 2)
+            self._review_cards[key] = val
+        v.addLayout(cards)
+
+        self.lbl_review_plan = QLabel("")
+        self.lbl_review_plan.setWordWrap(True)
+        self.lbl_review_plan.setStyleSheet(
+            f"color:{T('text')}; background:{rgba(T('accent'), 0.07)};"
+            f" border:1px solid {rgba(T('accent'), 0.22)}; border-radius:10px;"
+            " padding:10px 12px; font-size:11px;")
+        v.addWidget(self.lbl_review_plan)
+
+        safety_title = QLabel("SAFETY SNAPSHOT")
+        safety_title.setStyleSheet(f"color:{T('amber')}; font-size:10px; font-weight:800; letter-spacing:0.8px;")
+        v.addWidget(safety_title)
         self.lbl_review = self._status_box()
         v.addWidget(self.lbl_review, 1)
+
+        note = QLabel("APPLY SETUP = เปลี่ยน configuration เท่านั้น · NO ARM · NO TAKEOFF · NO mission execution")
+        note.setWordWrap(True)
+        note.setStyleSheet(
+            f"color:{T('green')}; background:{rgba(T('green'), 0.08)};"
+            f" border:1px solid {rgba(T('green'), 0.22)}; border-radius:8px; padding:7px 9px;"
+            " font-size:9px; font-weight:800;")
+        v.addWidget(note)
         return w
+
+    def _refresh_review_dashboard(self):
+        op_names = {k: lab for k, lab, _ in OPERATIONS}
+        ids = self._selected_ids()
+        self._review_cards["targets"].setText(str(len(ids)))
+        self._review_cards["operation"].setText(op_names.get(self._operation(), self._operation()))
+        self._review_cards["takeoff"].setText(f"{self.sp_takeoff.value():.0f} m")
+        self._review_cards["speed"].setText(f"{self.sp_speed.value():.1f} m/s")
+
+        target_text = ", ".join(f"D{x}" for x in ids) if ids else "NONE"
+        lines = [f"TARGETS   {target_text}"]
+        if self._operation() in ("formation", "swarm"):
+            lines += [
+                f"FORMATION   {self.cmb_formation.currentText()}",
+                f"SPACING   {self.sp_spacing.value():.0f} m",
+                f"ALT OFFSET   {self.sp_offset.value():.0f} m",
+                f"FORMATION SPEED   {self.sp_form_speed.value():.1f} m/s",
+                "LEADER   unchanged in Quick Setup",
+            ]
+        else:
+            lines.append("FORMATION   not used for this operation")
+        self.lbl_review_plan.setText("\n".join(lines))
+        self.lbl_review.setText("\n".join(self._safety_lines()))
 
     def _load_state(self):
         self.sp_takeoff.setValue(float(self._state.get("takeoff_alt", 20.0)))
@@ -407,7 +470,7 @@ class QuickSetupDialog(QDialog):
         if self._step == 4:
             self._refresh_safety()
         if self._step == 5:
-            self.lbl_review.setText(self._review_text())
+            self._refresh_review_dashboard()
 
     def _back(self):
         self._show_step(self._step - 1)

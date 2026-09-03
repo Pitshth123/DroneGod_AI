@@ -21,6 +21,10 @@ class SummaryPresenter:
         "wave": ("wave", "WAVE"),
         "rtlcfg": ("return_plan", "RETURN PLAN"),
         "fence": ("geofence", "GEOFENCE"),
+        "quick_setup": ("quick_setup", "QUICK SETUP"),
+        "quick_takeoff": ("quick_takeoff", "TAKEOFF ALT"),
+        "quick_speed": ("quick_speed", "MISSION SPEED"),
+        "quick_formation": ("quick_formation", "FORMATION"),
     }
 
     def __init__(self, plan, *, request_render, log_command, summary_box,
