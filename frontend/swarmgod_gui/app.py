@@ -1483,19 +1483,6 @@ class GroundStation(QMainWindow):
         hd.addWidget(self.btn_field)
         self._field_paint()
 
-        # Quick Setup อยู่หัว COMMANDS ข้าง LAN เพื่อรวมเครื่องมือเตรียมงานไว้จุดเดียว
-        # และลดความรกของ top bar หลัก
-        self.btn_quick_setup = QPushButton("✓ QUICK SETUP")
-        self.btn_quick_setup.setFixedHeight(28)
-        self.btn_quick_setup.setCursor(Qt.PointingHandCursor)
-        self.btn_quick_setup.setToolTip(
-            "ตั้งค่าแบบเป็นขั้นตอน: Connect → Select → Operation → Configure → Safety → Review\n"
-            "Apply เปลี่ยนเฉพาะค่าบน Cockpit — ไม่ ARM / ไม่ TAKEOFF")
-        self.btn_quick_setup.setStyleSheet(tinted_btn(T("accent"), radius=8, font=9, weight=800))
-        self.btn_quick_setup.clicked.connect(self._open_quick_setup)
-        hd.addSpacing(6)
-        hd.addWidget(self.btn_quick_setup)
-
         # เมนูไฟล์ตั้งค่า (Save/Export/Load) — ย้ายมาจากแถบซ้าย
         hd.addSpacing(6)
         hd.addWidget(self._build_cfg_button())
@@ -2475,6 +2462,20 @@ class GroundStation(QMainWindow):
         self.lbl_pf_list.setStyleSheet(
             f"color:{T('faint')}; font-size:9px; font-family:{FONT_MONO};")
         sec.add_widget(self.lbl_pf_list)
+
+        # Guided preparation belongs with the pre-flight gate, not in the
+        # crowded COMMANDS header. It only edits cockpit configuration and
+        # never ARM/TAKEOFFs by itself.
+        self.btn_quick_setup = QPushButton("QUICK SETUP")
+        self.btn_quick_setup.setMinimumHeight(42)
+        self.btn_quick_setup.setCursor(Qt.PointingHandCursor)
+        self.btn_quick_setup.setToolTip(
+            "ตั้งค่าแบบเป็นขั้นตอน: Connect → Select → Operation → Configure → Safety → Review\n"
+            "Apply เปลี่ยนเฉพาะค่าบน Cockpit — ไม่ ARM / ไม่ TAKEOFF")
+        self.btn_quick_setup.setStyleSheet(
+            tinted_btn(T("accent"), radius=9, font=11, weight=800))
+        self.btn_quick_setup.clicked.connect(self._open_quick_setup)
+        sec.add_widget(self.btn_quick_setup)
         return sec
 
     def _focus_preflight_section(self):

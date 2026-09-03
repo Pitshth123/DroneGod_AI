@@ -61,8 +61,10 @@ class TestQuickSetupGroundStation(unittest.TestCase):
         self.win.deleteLater()
         _app.processEvents()
 
-    def test_commands_header_exposes_quick_setup(self):
-        self.assertEqual(self.win.btn_quick_setup.text(), "✓ QUICK SETUP")
+    def test_preflight_section_exposes_quick_setup(self):
+        self.assertEqual(self.win.btn_quick_setup.text(), "QUICK SETUP")
+        self.assertGreaterEqual(self.win.btn_quick_setup.minimumHeight(), 42)
+        self.assertIsNot(self.win.btn_quick_setup.parentWidget(), self.win._topbar)
         self.assertIsNotNone(self.win.btn_field)
         tip = self.win.btn_quick_setup.toolTip()
         self.assertIn("ไม่ ARM", tip)
