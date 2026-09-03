@@ -20,7 +20,7 @@ from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QScrollArea, QFrame, QGridLayout, QComboBox, QButtonGroup,
     QSizePolicy, QMenu, QFileDialog, QInputDialog, QStackedWidget, QApplication,
-    QCheckBox,
+    QCheckBox, QDialog,
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWebChannel import QWebChannel
@@ -58,7 +58,8 @@ from .widgets.help_dialog import HelpDialog
 from .widgets.logo_dialog import LogoSettingsDialog
 from .widgets.field_dialog import FieldTabletDialog
 from .core import logo_store
-from .widgets.takeoff_panel import TakeoffPanel
+from .widgets.flight_panel import build_flight_section
+from .widgets.quick_setup_dialog import QuickSetupDialog
 from .widgets.command_summary import CommandSummaryBox
 from .widgets import confirm as confirm_dlg
 from .widgets.preflight_dialog import (
@@ -586,6 +587,16 @@ class GroundStation(QMainWindow):
         h.addWidget(self.pill_core)
         self.pill_link = self._pill("LINK --", T("dim"), compact=True)
         h.addWidget(self.pill_link)
+
+        self.btn_quick_setup = QPushButton("QUICK SETUP")
+        self.btn_quick_setup.setMinimumHeight(32)
+        self.btn_quick_setup.setCursor(Qt.PointingHandCursor)
+        self.btn_quick_setup.setToolTip(
+            "ตั้งค่าแบบเป็นขั้นตอน: Connect → Select → Operation → Configure → Safety → Review\n"
+            "Apply เปลี่ยนเฉพาะค่าบน Cockpit — ไม่ ARM / ไม่ TAKEOFF")
+        self.btn_quick_setup.setStyleSheet(tinted_btn(T("accent"), radius=10, font=10, weight=800))
+        self.btn_quick_setup.clicked.connect(self._open_quick_setup)
+        h.addWidget(self.btn_quick_setup)
         # PREFLIGHT อยู่ข้าง ● ONLINE ในแผง FLEET — ไม่ใส่ตรงนี้
         # กันแถบซ้ายของ topbar ยื่นยาวจนป้ายโหมดกลางไม่สมดุล
         # ปุ่ม LAN อยู่หัวแผง COMMANDS · โหมดการบินเป็นป้ายกลาง (ดู _build_mode_drop)
@@ -637,6 +648,131 @@ class GroundStation(QMainWindow):
     def _show_help(self):
         """เปิด modal คู่มือการใช้งาน + แผนที่ความสัมพันธ์ระหว่างฟังก์ชัน"""
         HelpDialog(self).exec_()
+
+    def _quick_setup_state(self):
+        """Read-only snapshot for the Quick Setup wizard."""
+        online = set(self._connected_ids())
+        drones = []
+        for did in sorted(self.fleet_items):
+            t = self._last_telem.get(did)
+            row = {"id": int(did), "name": self._drone_name(did)}
+            if t is not None:
+                row.update({
+                    "battery_pct": float(getattr(t, "battery_pct", 0.0)),
+                    "gps_fix": int(getattr(t, "gps_fix", 0)),
+                    "sat_count": int(getattr(t, "sat_count", 0)),
+                    "link_quality": int(getattr(t, "link_quality", 0)),
+                })
+            drones.append(row)
+        def _value(attr, default):
+            w = getattr(self, attr, None)
+            try:
+                return float(w.value()) if w is not None else float(default)
+            except Exception:
+                return float(default)
+        formation = 0
+        if hasattr(self, "form_picker"):
+            try:
+                formation = int(self.form_picker.current())
+            except Exception:
+                formation = 0
+        return {
+            "drones": drones,
+            "online_ids": sorted(online),
+            "selected_ids": list(self._selected_or_all()),
+            "operation": getattr(self, "_quick_setup_operation", "direct"),
+            "takeoff_alt": _value("sf_takeoff", 20),
+            "speed": _value("sf_speed", 3),
+            "formation": formation,
+            "spacing": _value("sf_spacing", 12),
+            "offset": _value("sf_offset", 5),
+            "form_speed": _value("sf_formspeed", 4),
+        }
+
+    def _quick_setup_safety_snapshot(self):
+        """Read-only safety snapshot; intentionally sends no RPC."""
+        snap = self._preflight_snapshot()
+        return {
+            "profile": snap.get("profile", ""),
+            "home_loc": bool(snap.get("home_loc")),
+            "mtls": bool(snap.get("mtls")),
+            "ui_mode": bool(snap.get("ui_mode")),
+            "drones": list(snap.get("drones", []) or []),
+        }
+
+    def _open_quick_setup(self):
+        """Open configuration-only wizard; no ARM/TAKEOFF/mission execution."""
+        dlg = QuickSetupDialog(
+            self,
+            state=self._quick_setup_state(),
+            state_cb=self._quick_setup_state,
+            connect_cb=self._on_connect_clicked,
+            safety_cb=self._quick_setup_safety_snapshot,
+        )
+        if dlg.exec_() != QDialog.Accepted or not dlg.result_config:
+            return
+        self._apply_quick_setup(dlg.result_config)
+
+    def _apply_quick_setup(self, cfg):
+        """Apply wizard choices to cockpit widgets only; never dispatch flight RPCs."""
+        if not isinstance(cfg, dict):
+            return
+        picked = [int(d) for d in cfg.get("selected_ids", []) if int(d) in self.fleet_items]
+        self._selected_ids = set(picked)
+        self._selected_id = picked[0] if picked else 0
+        self._refresh_selection_ui()
+        if self._selected_id:
+            self._select_drone(self._selected_id)
+        else:
+            self._clear_selected_card()
+
+        # Reuse the existing settings loader for local widget values only.
+        # No ui_mode/endpoint/leader fields are supplied here.
+        self._apply_settings({
+            "formation": int(cfg.get("formation", 0)),
+            "sliders": {
+                "takeoff_alt": float(cfg.get("takeoff_alt", 20.0)),
+                "speed": float(cfg.get("speed", 3.0)),
+                "spacing": float(cfg.get("spacing", 12.0)),
+                "offset": float(cfg.get("offset", 5.0)),
+                "form_speed": float(cfg.get("form_speed", 4.0)),
+            },
+        }, replace_ips=False)
+        self._quick_setup_operation = str(cfg.get("operation") or "direct")
+
+        # Bring the relevant existing Cockpit section into focus, but do not
+        # toggle a mission mode or execute anything. The normal manual UI stays intact.
+        focus = {
+            "direct": getattr(self, "sec_flight", None),
+            "waypoint": getattr(self, "sec_waypoint", None),
+            "formation": getattr(self, "sec_formation", None),
+            "swarm": getattr(self, "sec_formation", None),
+        }.get(self._quick_setup_operation)
+        if focus is not None:
+            focus.setExpanded(True)
+            try:
+                self._cmd_scroll.ensureWidgetVisible(focus)
+            except Exception:
+                pass
+
+        # Configuration changed after any previous checks, so require a fresh
+        # pre-flight review before TAKEOFF. This is intentionally fail-safe.
+        self._preflight = preflight.PreflightState()
+        self._refresh_preflight_ui()
+
+        op_label = {
+            "direct": "DIRECT / TAKEOFF",
+            "waypoint": "WAYPOINT ROUTE",
+            "formation": "FORMATION",
+            "swarm": "SWARM",
+        }.get(self._quick_setup_operation, self._quick_setup_operation.upper())
+        targets = ", ".join(f"D{d}" for d in picked) if picked else "NONE"
+        self._summ_set("quick_setup", "QUICK SETUP", f"{op_label} · {targets}")
+        self._log(
+            f"QUICK SETUP applied · {op_label} · targets={targets} · "
+            f"takeoff={float(cfg.get('takeoff_alt', 20.0)):.0f}m",
+            category="STATUS")
+        self._show_toast("Quick Setup applied · ต้อง PRE-FLIGHT ใหม่ก่อนบิน", "ok")
 
     def _build_gear_menu(self):
         menu = QMenu(self)
@@ -1347,9 +1483,16 @@ class GroundStation(QMainWindow):
         # PRE-FLIGHT อยู่บนสุด — ต้องผ่านก่อนถึงจะไปหมวด FLIGHT ด้านล่าง
         self.sec_preflight = self._sec_preflight()
         v.addWidget(self.sec_preflight)
-        for sec in (self._sec_flight(), self._sec_waypoint(), self._sec_movement(),
-                    self._sec_formation(), self._sec_safety(), self._sec_geofence(),
-                    self._sec_tactical()):
+        self.sec_flight = self._sec_flight()
+        self.sec_waypoint = self._sec_waypoint()
+        self.sec_movement = self._sec_movement()
+        self.sec_formation = self._sec_formation()
+        self.sec_safety = self._sec_safety()
+        self.sec_geofence = self._sec_geofence()
+        self.sec_tactical = self._sec_tactical()
+        for sec in (self.sec_flight, self.sec_waypoint, self.sec_movement,
+                    self.sec_formation, self.sec_safety, self.sec_geofence,
+                    self.sec_tactical):
             self._sections.append(sec)
             v.addWidget(sec)
         # CV Track ไม่ถูกล็อกโดย REMOTE (เป็นเซนเซอร์ ไม่ใช่คำสั่งบิน) + กล้องยังไม่ต่อ
@@ -1664,70 +1807,8 @@ class GroundStation(QMainWindow):
         return seg
 
     def _sec_flight(self):
-        sec = AccordionSection("FLIGHT", accent=T("green"), expanded=True)
-
-        # คำสั่งที่ใช้ระหว่างบินจริงอยู่ชั้นแรกทั้งหมด — ไม่ต้องกางเมนูเพิ่ม
-        tl = QLabel("QUICK FLIGHT")
-        tl.setStyleSheet(section_label_qss())
-        sec.add_widget(tl)
-        g = QGridLayout()
-        g.setSpacing(6)
-        g.addWidget(self._flight_btn("▶", "ARM", self._cmd_arm, primary=True), 0, 0)
-        g.addWidget(self._flight_btn("■", "DISARM", self._cmd_disarm), 0, 1)
-        g.addWidget(self._flight_btn("⬇", "LAND", self._cmd_land), 1, 0)
-        g.addWidget(self._flight_btn("↩", "RTL", self._cmd_rtl), 1, 1)
-        g.addWidget(self._flight_btn("❚❚", "HOLD", self._cmd_hold), 2, 0, 1, 2)
-        sec.add_layout(g)
-
-        # TAKEOFF เป็น workflow หลัก จึงคงไว้ชั้นแรก แต่ตัด label ที่ซ้ำกันออก
-        self.sf_takeoff = SliderField("TAKEOFF ALTITUDE", 1, 120, 20, 1, "m", 0, T("accent"))
-        sec.add_widget(self.sf_takeoff)
-        self.takeoff_panel = TakeoffPanel(default_alt=20.0)
-        self.takeoff_panel.takeoff_requested.connect(self._on_panel_takeoff)
-        self.takeoff_panel.fleet_toggled.connect(self._on_fleet_toggled)
-        self.takeoff_panel.changed.connect(self._update_takeoff_summary)
-        self.sf_takeoff.valueChanged.connect(self.takeoff_panel.set_default_alt)
-        sec.add_widget(self.takeoff_panel)
-
-        # ของที่ใช้เป็นครั้งคราวย้ายเข้า ADVANCED FLIGHT เพื่อลดความแน่นของหน้า
-        # signal/handler เดิมทั้งหมดคงไว้ — เปลี่ยนเฉพาะ presentation hierarchy
-        advanced = AccordionSection("ADVANCED FLIGHT", accent=T("dim"), expanded=False)
-
-        sl = QLabel("PAYLOAD SERVO")
-        sl.setStyleSheet(section_label_qss())
-        advanced.add_widget(sl)
-        srow = QHBoxLayout()
-        srow.setSpacing(8)
-        self.btn_servo_a = self._servo_btn("A", T("red"))
-        self.btn_servo_b = self._servo_btn("B", T("yellow"))
-        srow.addWidget(self.btn_servo_a, 1)
-        srow.addWidget(self.btn_servo_b, 1)
-        advanced.add_layout(srow)
-
-        self.btn_cancel_nav = QPushButton("CANCEL NAV")
-        self.btn_cancel_nav.setMinimumHeight(36)
-        self.btn_cancel_nav.setCursor(Qt.PointingHandCursor)
-        self.btn_cancel_nav.setToolTip(
-            "ยกเลิกเป้าหมาย: ลบจุดเป้า+เส้นประ+เส้นทาง Waypoint บนแผนที่\n"
-            "แล้วให้โดรนหยุดลอยค้างที่เดิม (คงโหมด GUIDED · ความสูงเท่าเดิม ไม่ลดระดับ)")
-        self.btn_cancel_nav.setStyleSheet(tinted_btn(T("red"), radius=8, font=11))
-        self.btn_cancel_nav.clicked.connect(self._cancel_navigation)
-        advanced.add_widget(self.btn_cancel_nav)
-
-        ml = QLabel("FLIGHT MODE")
-        ml.setStyleSheet(section_label_qss())
-        advanced.add_widget(ml)
-        gm = QGridLayout()
-        gm.setSpacing(6)
-        modes = [("Guided", "FLIGHT_MODE_GUIDED"), ("Loiter", "FLIGHT_MODE_LOITER"),
-                 ("Stabilize", "FLIGHT_MODE_STABILIZE"), ("PosHold", "FLIGHT_MODE_POSHOLD")]
-        for i, (label, enum) in enumerate(modes):
-            gm.addWidget(self._abtn(label, T("dim"), lambda _, e=enum: self._cmd_mode(e), "ghost"),
-                         i // 2, i % 2)
-        advanced.add_layout(gm)
-        sec.add_widget(advanced)
-        self.sec_flight_advanced = advanced
-        return sec
+        """Build the flight controls through the extracted presentation module."""
+        return build_flight_section(self)
 
     # ══════════════════════════════════════════════════════════
     #  WAYPOINT ROUTE PLANNING
