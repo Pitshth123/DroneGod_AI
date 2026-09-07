@@ -1,6 +1,6 @@
 # DroneGod_AI — Team L Full Migration Roadmap & Human-Readable Handoff
 
-Date: 2026-08-30
+Date: 2026-09-06 (roadmap/status synchronization)
 
 Active project: `C:\Users\PC\Desktop\v2 swam\DroneGod_AI`
 
@@ -927,11 +927,11 @@ Bug บางอย่างไม่เห็นใน unit test หรือ s
 
 ---
 
-## V3-H02 — Actual FC / Airframe Bench ⛔ NEXT REQUIRED GATE
+## V3-H02 — Actual FC / Airframe Bench 🟠 IN PROGRESS
 
-นี่คือสิ่งที่ต้องทำต่อเมื่อมี Flight Controller จริง
+Actual Flight Controller พร้อมแล้วและ H02 เริ่มทดสอบจริงแล้ว: **5.1–5.3 PASS / 5.4–5.9 PENDING** พร้อม operator-visible GUIDED/ARM/DISARM follow-up. H02 ยังไม่ exit PASS และยังไม่ปลด R01.
 
-**ต้องทำแบบ props removed / physically safe**
+**ทุก bench session ต้องยืนยัน physical safety ตาม procedure ของ session นั้น**
 
 Required evidence:
 
@@ -996,7 +996,7 @@ H02 จึงเป็น blocker ที่ถูกต้องก่อนบ�
 | V2 F8 | V3-S12 | DONE / expanded |
 | V2 H1/M1 audit | V3-S05 | DONE |
 | V2 F9A | V3-H01 | DONE |
-| V2 F9B | V3-H02 | NEXT / ACTUAL FC REQUIRED |
+| V2 F9B | V3-H02 | IN PROGRESS — 5.1–5.3 PASS / 5.4–5.9 PENDING |
 | Old F10 | V3-R01 | LOCKED |
 
 ---
@@ -1048,10 +1048,10 @@ Go side ถูก rerun หลายรอบด้วย:
 10. dedup ห้าม suppress emergency/takeover/non-idempotent command แบบผิด semantics
 11. legacy unsupported scope ต้องอยู่ Python-owned จนกว่าสcope นั้นผ่าน migration gate จริง
 12. authority token ใหม่ห้ามเปิดเพียงเพราะ test-only implementation มีอยู่
-13. SWARM follower takeover behavior ห้ามเดาเอง — `DECISION REQUIRED`
-14. `rtl_after` ห้าม invent behavior — ยัง BLOCKED
+13. SWARM follower/leader takeover policy ถูก RATIFY + PRE-FLIP implement แล้ว แต่ `core-swarm-leader` ยังห้ามเปิด live จนผ่าน validation ladder
+14. Return Policy / `rtl_after` contract ถูก RATIFY + PRE-FLIP implement แล้ว แต่ live validation/flip ยัง pending
 15. H02 ต้องใช้ actual FC; SITL แทนไม่ได้
-16. R01 ห้ามเปิดก่อน H02 PASS
+16. R01 ห้ามเปิดก่อน H02 PASS และ release review ของ exact scope
 
 ---
 
@@ -1065,10 +1065,11 @@ Go side ถูก rerun หลายรอบด้วย:
 - WAVE Core authority
 - payload/servo waypoint Core authority
 
-## ยัง unresolved
+## PRE-FLIP resolved แต่ยังไม่ live
 
-- follower operator takeover policy ใน SWARM_LEADER
-- `rtl_after` semantics สำหรับ Core route authority
+- SWARM_LEADER follower/leader takeover + succession policy: **RATIFIED / PRE-FLIP IMPLEMENTED / REVIEW PASS**, live authority validation pending
+- Return Policy / `rtl_after`: **RATIFIED / PRE-FLIP IMPLEMENTED / REVIEW PASS**, live validation/flip pending
+- S09 administrative baseline freeze: review PASS แล้ว แต่ยังไม่มีหลักฐานแยกใน docs ว่า freeze action เสร็จสมบูรณ์
 
 ## Deferred validation
 
@@ -1091,15 +1092,18 @@ V3-S12 software/SITL ✅
         ↓
 V3-H01 tools ready ✅
         ↓
-V3-H02 ACTUAL FC BENCH  ← NEXT
+V3-H02 ACTUAL FC BENCH  🟠 IN PROGRESS
+5.1–5.3 PASS → 5.4–5.9 PENDING
         ↓
 ถ้าเจอ defect → แก้เฉพาะ defect + rerun affected gate
         ↓
-H02 PASS
+H02 BASE PASS
         ↓
-Release review
+S09 live scopes ทีละ scope + full validation ladder
         ↓
-V3-R01 Controlled Real Flight
+Controlled-flight matrix / release review
+        ↓
+V3-R01 Full Production Release
 ```
 
 อย่าใช้เวลาย้อนทำ S01–S12 ใหม่เพราะ requirement ถูกพูดซ้ำ
@@ -1151,7 +1155,7 @@ V3-R01 Controlled Real Flight
 
 ---
 
-# 14. Current Status Stamp — 2026-08-30
+# 14. Current Status Stamp — 2026-09-06
 
 ```text
 V3-S01 ✅ DONE
@@ -1167,7 +1171,7 @@ V3-S10 ✅ COMPLETE
 V3-S11 ✅ COMPLETE
 V3-S12 ✅ CURRENT OPERATIONAL GATE COMPLETE
 V3-H01 ✅ DONE
-V3-H02 ⛔ NEXT — ACTUAL FC REQUIRED
+V3-H02 🟠 IN PROGRESS — 5.1–5.3 PASS / 5.4–5.9 PENDING
 V3-R01 🔒 LOCKED
 ```
 

@@ -31,7 +31,7 @@ from .core.theme import (
     tinted_btn, filled_btn, ghost_btn, pad_btn, section_label_qss, card_qss,
     drone_color, badge_style, DRONE_COLORS, set_drone_color,
 )
-from .core.grpc_client import CoreClient, TelemetryThread, EventThread
+from .core.grpc_client import CoreClient, TelemetryThread, EventThread, format_rpc_error
 from .core.command_gateway import CommandGateway
 from .core.field_server import (
     FieldServer, SessionStore, TelemetryHub, DEFAULT_PORT as DEFAULT_FIELD_PORT,
@@ -3647,7 +3647,7 @@ class GroundStation(QMainWindow):
                     else:
                         self.cmd_result.emit(f"{label}: ok=False {msg}".strip())
             except Exception as e:
-                self.cmd_result.emit(f"{label}: ERROR {e}")
+                self.cmd_result.emit(f"{label}: ERROR {format_rpc_error(e)}")
         threading.Thread(target=worker, daemon=True).start()
 
     def _cmd_arm(self):
@@ -5388,7 +5388,7 @@ class GroundStation(QMainWindow):
                     self.cmd_result.emit(
                         f"{label}: ok={getattr(r, 'ok', True)} {getattr(r, 'message', '')}".strip())
             except Exception as e:
-                self.cmd_result.emit(f"{label}: ERROR {e}")
+                self.cmd_result.emit(f"{label}: ERROR {format_rpc_error(e)}")
         threading.Thread(target=worker, daemon=True).start()
 
     def _card_arm(self, drone_id):
@@ -6110,7 +6110,7 @@ class GroundStation(QMainWindow):
                     enforce_dedup=False)
                 self.cmd_result.emit(f"{label}: ok={getattr(r, 'ok', True)}")
             except Exception as e:
-                self.cmd_result.emit(f"{label}: ERROR {e}")
+                self.cmd_result.emit(f"{label}: ERROR {format_rpc_error(e)}")
         threading.Thread(target=worker, daemon=True).start()
 
     # ── collision-avoidance movement ordering (spec 7) ──

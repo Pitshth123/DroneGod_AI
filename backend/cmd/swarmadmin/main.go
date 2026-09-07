@@ -6,6 +6,7 @@
 //
 //	go run ./cmd/swarmadmin user add <username> [role]     # อ่านรหัสจาก stdin หรือ env SWARMGOD_NEW_PASSWORD
 //	go run ./cmd/swarmadmin user list
+//	go run ./cmd/swarmadmin user reset-password <username>
 //	go run ./cmd/swarmadmin vehicle list
 //
 // เลือกไฟล์ DB ด้วย env SWARMGOD_DB (default logs/swarmgod.db)
@@ -103,6 +104,18 @@ func cmdUser(st *store.Store, args []string) {
 			die("count users: %v", err)
 		}
 		fmt.Printf("%d user(s) in %s\n", n, "store")
+	case "reset-password":
+		if len(args) < 2 {
+			die("usage: user reset-password <username>")
+		}
+		pw := readPassword()
+		if pw == "" {
+			die("empty password rejected (spec §15)")
+		}
+		if err := st.ResetUserPassword(args[1], pw); err != nil {
+			die("reset password: %v", err)
+		}
+		fmt.Printf("✓ reset password for %q and revoked existing sessions\n", args[1])
 	default:
 		die("unknown user subcommand %q", args[0])
 	}
@@ -143,6 +156,7 @@ func readPassword() string {
 func usage() {
 	fmt.Fprintln(os.Stderr, `swarmadmin — จัดการ SwarmGod store
   user add <username> [role]   สร้าง user (รหัสจาก stdin หรือ env SWARMGOD_NEW_PASSWORD)
+  user reset-password <user>   ตั้งรหัสใหม่และ revoke sessions เดิม (local recovery)
   user list                    นับจำนวน user
   session new <user> [ttl-h]   login → พิมพ์ bearer token (ออก stdout)
   vehicle list                 แสดง vehicle registry

@@ -1,0 +1,32 @@
+{
+  "generated_at": "2026-09-03T11:09:06+07:00",
+  "core": "127.0.0.1:50051",
+  "drone_id": 1,
+  "duration_seconds": 60,
+  "timing": {
+    "samples": 601,
+    "rate_hz": 10.000166669444491,
+    "interval_p50_ms": 100,
+    "interval_p95_ms": 101,
+    "interval_max_ms": 106,
+    "age_p50_ms": 1,
+    "age_p95_ms": 1,
+    "age_max_ms": 5
+  },
+  "telemetry_verified": true,
+  "link_quality_min": 99,
+  "link_quality_max": 100,
+  "drop_rate_max_permille": 0,
+  "rssi_available": false,
+  "link_warn_seconds": 3,
+  "link_lost_seconds": 10,
+  "timing_below_link_warn_margin": true,
+  "mission": {
+    "active": false,
+    "authority_active": false,
+    "run_id": 0,
+    "plan_id": "",
+    "state": "MISSION_STATE_IDLE",
+    "revision": 0
+  }
+}

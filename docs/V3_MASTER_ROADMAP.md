@@ -1,7 +1,8 @@
 # DroneGod_AI — V3 Master Roadmap
 
 Date created: 2026-08-28
-Active project: `C:\Users\PC\Desktop\v2 swam\DroneGod_AI`
+Last status sync: **2026-09-06**
+Active project: `C:\Users\staff\OneDrive\Desktop\DroneNew`
 Legacy reference: `C:\Users\PC\Desktop\v2 swam\DroneGod` (**READ ONLY**)
 
 > **V3 is now the canonical roadmap.**
@@ -47,19 +48,32 @@ Important scope rule:
 | **V3-S06** | Telemetry Read Model + UI/gRPC Lifecycle | **DONE** | TelemetryStore, shadow parity, render coalescing, low-risk readers, deterministic Qt/gRPC stream shutdown; lifecycle stress; full frontend 1031/1031 PASS | Preserve as completed foundation; no further S06 work required |
 | **V3-S07** | Command Gateway + Emergency Priority | **DONE** | Stable per-target claims; atomic cancellation/final-write guards; explicit takeover priority; typed Takeoff rollback ownership; long-running `request_id` replay | Preserve invariants during later stages; no S07 implementation remains |
 | **V3-S08** | Command Identity + Correlation + Dedup | **DONE** | Six-class `CommandLedger`; semantic fingerprints; neutral suppressed result; application-wide mutating Gateway coverage including Preflight and mission mutation RPCs; request/result-linked Core audit | Preserve classification, correlation isolation, and coverage inventory |
-| **V3-S09** | Mission Authority Expansion | **FINAL REVIEW PASS — 0 CRITICAL / 0 HIGH — READY TO FREEZE (PRE-FLIP)** | A–F pre-flip implementation exists and the current source passed fresh independent re-review. Fleet failsafe final-write ownership now covers Mission GOTO/HOLD, steady-state Formation, all form-up leader/follower writes, generic automatic Return RTL, and SWARM_RETURN GOTO/LAND/fallback RTL while keeping ACK waits outside `fsMu`. Typed-nil coordinators fail closed; accepted-target ordering, Return outcomes, current-membership succession, no-auto-rejoin, and command-inert restart remain verified. No new live token; only `core-single` / `core-single-wait` remain live. | **Freeze the S09 PRE-FLIP software baseline as a separate administrative step.** Freeze does **not** authorize authority flip. After freeze, stop S09 edits unless a new proven defect appears and continue only through the staged SITL/hardware validation plan; H02 remains future hardware work. |
+| **V3-S09** | Mission Authority Expansion | **FINAL REVIEW PASS — 0 CRITICAL / 0 HIGH — READY TO FREEZE (PRE-FLIP)** | A–F pre-flip implementation exists and the current source passed fresh independent re-review. Fleet failsafe final-write ownership now covers Mission GOTO/HOLD, steady-state Formation, all form-up leader/follower writes, generic automatic Return RTL, and SWARM_RETURN GOTO/LAND/fallback RTL while keeping ACK waits outside `fsMu`. Typed-nil coordinators fail closed; accepted-target ordering, Return outcomes, current-membership succession, no-auto-rejoin, and command-inert restart remain verified. No new live token; only `core-single` / `core-single-wait` remain live. | **Record/complete the S09 PRE-FLIP software baseline freeze as a separate administrative step.** Freeze does **not** authorize authority flip. H02 base validation is already in progress under the existing narrow authority; after H02 base PASS, validate and flip deferred S09 scopes one at a time through the staged SITL/failure/soak/hardware/controlled-flight plan. |
 | **V3-S10** | Persistence + Restartability | **COMPLETE (verified 2026-08-29)** | Durable SQLite mission persistence with monotonic run_id / operation_id history; an unfinished Core mission survives restart as command-inert RECOVERY_REQUIRED / INTERRUPTED evidence (Active=false, Authority=false, zero flight command); corrupt/truncated/unknown-schema fail safe; persistence faults are operator-visible; reconnect is presentation-only. See [V3_S10_PERSISTENCE_RESTARTABILITY.md](V3_S10_PERSISTENCE_RESTARTABILITY.md) | — |
 | **V3-S11** | Failure Injection Expansion | **COMPLETE (verified 2026-08-29)** | Architecture-wide failure families audited as already-covered by the existing suite; deterministic gaps closed (semantic persistence corruption fail-closed, no write-churn on inert telemetry, GROUPED durable progression across restart, recovery-clear DELETE boundary, out-of-order telemetry freshness). Every new scenario declares an Expected Safe State; no production bug found. (At S11 time the SWARM follower-takeover policy had not yet been ratified; it was later ratified and implemented PRE-FLIP in S09-C on 2026-08-30.) See [V3_S11_FAILURE_INJECTION_EXPANSION.md](V3_S11_FAILURE_INJECTION_EXPANSION.md) | — |
-| **V3-S12** | SITL Endurance + Performance | **TOOLING COMPLETE / LONG-RUN EVIDENCE PENDING** | V2 F8 baseline reused; canonical duration/scenario JSON harness; process/telemetry/presentation/RPC/file-growth metrics; deterministic cleanup; short SITL idle/presentation/reconnect/client-lifecycle validation PASS | Execute and accept the actual 30m→2h→6h→12h ladder plus 5/10-drone and prepared-airborne Start/Cancel evidence; no long duration claimed |
+| **V3-S12** | SITL Endurance + Performance | **CURRENT OPERATIONAL GATE COMPLETE** | Canonical duration/scenario JSON harness plus actual 6h idle-connected PASS, 15m reconnect-churn PASS, and 15m client-lifecycle PASS; 216,002 telemetry / 723 RPC / 0 RPC errors / 0 stream errors / 0 UI stalls on the 6h run | 12h/24h, long 5/10-drone and prepared-airborne Start/Cancel campaigns are **DEFERRED EXTENDED VALIDATION**, not current blockers; watch the one transient non-blocking `SQLITE_BUSY` observation |
 | **V3-H01** | Hardware Bench Preparation | **DONE** | benchprobe, benchack, parameter audit, evidence merger, HIL interlock | Maintain tooling only |
-| **V3-H02** | Actual FC/Airframe Bench | **BLOCKED: ACTUAL FC** | Procedure/tooling prepared | Real FC parameters, ACK timing, telemetry, Core-loss onboard failsafe, takeover, waypoint/WAIT bench evidence |
+| **V3-H02** | Actual FC/Airframe Bench | **IN PROGRESS — 5.1–5.3 PASS / 5.4–5.9 PENDING** | Actual FC `192.168.9.184:5760` reached; parameter baseline, real telemetry timing and guarded COMMAND_ACK evidence captured; operator-visible HIL path subsequently reached GUIDED → ARM → DISARM; session token issuance completed without recording the secret value | Capture post-token SYSTEM TEST evidence, then prove Core-owned waypoint, WAIT/HOLD, Cancel, controlled Core/GCS-loss failsafe, battery/link preemption, manual/STOP/E-STOP takeover and restart/no-auto-resume. No real-flight clearance is implied. |
 | **V3-R01** | Controlled Real Flight Release | **LOCKED** | None claimed | Unlock only after V3-H02 PASS and explicit release review |
 
 ---
 
-# 3. Current Position — The Only Current Work Item
+# 3. Current Position — H02 Actual-FC Bench Is the Active Gate
 
-## V3-S07 + V3-S08 — Independent closure review
+**Current status stamp (2026-09-06):**
+
+- V3-S01–S08: **DONE**.
+- V3-S09: **FINAL REVIEW PASS — 0 Critical / 0 High — READY FOR PRE-FLIP FREEZE; authority not flipped**. No separate evidence currently proves that the administrative freeze itself was completed.
+- V3-S10: **COMPLETE**.
+- V3-S11: **COMPLETE**.
+- V3-S12: **CURRENT OPERATIONAL GATE COMPLETE** with 6h + reconnect + client-lifecycle evidence.
+- V3-H01: **DONE**.
+- V3-H02: **IN PROGRESS**. 5.1–5.3 are evidenced PASS; operator-visible HIL later reached GUIDED/ARM/DISARM; 5.4–5.9 remain pending.
+- V3-R01: **LOCKED**.
+
+The active project effort is therefore H02 baseline completion, not reopening S07/S08/S10/S11/S12. Advanced S09 live authority scopes remain OFF and must be promoted one at a time only after the H02 base gate and their own validation ladders.
+
+## Historical closure detail — V3-S07 + V3-S08
 
 **Status: DONE (verified 2026-08-29). V3-S09 FRESH INDEPENDENT PRE-FLIP RE-REVIEW PASS — 0 CRITICAL / 0 HIGH — READY TO FREEZE.**
 
@@ -302,7 +316,7 @@ These rules must not be rewritten inside the Command Gateway. The Gateway must c
 
 # 9. V3-S07 — Command Gateway + Emergency Priority
 
-**Status: DONE (verified 2026-08-29). S09 IN PROGRESS / INDEPENDENT REVIEW BLOCKED.**
+**Status: DONE (verified 2026-08-29).**
 
 This is the old V1 Phase 4 plus the emergency-contention hardening discovered after V2.
 
@@ -390,7 +404,7 @@ Repair lock scope/priority without bypassing authority/failsafe/safety checks.
 
 # 10. V3-S08 — Command Identity + Correlation + Dedup
 
-**Status: DONE (verified 2026-08-29). S09 IN PROGRESS / INDEPENDENT REVIEW BLOCKED.**
+**Status: DONE (verified 2026-08-29).**
 
 Already exists in pieces:
 
@@ -555,7 +569,7 @@ Go `TestMissionSendRunsWithLockReleased`, `TestOperatorTakeoverCancelsInFlightMi
 
 # 11. V3-S09 — Mission Authority Expansion
 
-**Status: IN PROGRESS / INDEPENDENT REVIEW BLOCKED**
+**Status: FINAL REVIEW PASS — 0 CRITICAL / 0 HIGH — READY FOR PRE-FLIP FREEZE; AUTHORITY NOT FLIPPED**
 
 This stage absorbs all old V1/V2 confusion around "what mission work is still Python?".
 
@@ -568,7 +582,7 @@ This stage absorbs all old V1/V2 confusion around "what mission work is still Py
 
 ### S09-A — Multi-drone GROUPED
 
-**Status: PRE-FLIP IMPLEMENTATION EXISTS — ROUND 4 RE-REVIEW REQUIRED; authority NOT flipped.**
+**Status: PRE-FLIP IMPLEMENTATION EXISTS — FRESH INDEPENDENT REVIEW PASS; authority NOT flipped.**
 
 This delivered characterization → Core state model → shadow/parity → per-drone
 dispatch scaffold → tests for multi-drone GROUPED, deliberately **without**
@@ -578,9 +592,10 @@ Core scope, and the frontend still routes multi-drone GROUPED to the Python exec
 
 **Independent-review status:** Round-2 repair changes for P0-1 through P1-10 are
 present in the production implementation and characterization tests, with additional
-source-review fixes applied afterward. This roadmap deliberately makes no "all
-blockers resolved" or green claim; V3-S09 stays blocked until an independent
-cross-review accepts the implementation and evidence.
+source-review fixes applied afterward. The later fresh independent current-source
+review accepted the PRE-FLIP A–F implementation with **0 Critical / 0 High**. This
+is a software-review green only: the authority flip is still OFF and each live scope
+must still complete its SITL/failure/soak/hardware/controlled-flight validation ladder.
 
 #### Characterized legacy behavior (compatibility contract)
 
@@ -701,7 +716,7 @@ authority (`TestGroupedMultiApiFailsafeInterrupts`, engine
 
 ### S09-B — SEPARATE
 
-**Status: PRE-FLIP IMPLEMENTATION EXISTS — ROUND 4 RE-REVIEW REQUIRED; authority NOT flipped.**
+**Status: PRE-FLIP IMPLEMENTATION EXISTS — FRESH INDEPENDENT REVIEW PASS; authority NOT flipped.**
 
 **Characterized legacy behavior** (`app.py` `_wp_advance_one` / `_on_target_reached`
 SEPARATE branch; `waypoint_logic.check_route_conflicts`): each participant has its
@@ -748,10 +763,11 @@ separation parity, current→WP1 crossing); `internal/api/mission_separate_test.
 (fresh-start requirement, crossing-start rejection, ownership, takeover, failsafe);
 `frontend/tests/test_separate_characterization.py` remains the Legacy reference.
 
-**Open items (PRE-FLIP):** SEPARATE per-drone **dispatcher** (live sends) remains
+**Open items (PRE-FLIP):** SEPARATE per-drone **dispatcher/live enablement** remains
 separate flip-round work; frontend `authority_eligible` is unchanged (still
-Python-owned). The new Core conflict implementation itself must be independently
-cross-checked against the Python geometry before any flip.
+Python-owned). The fresh independent PRE-FLIP review has already accepted the current
+source at 0 Critical / 0 High. What remains is authority-on SITL parity/failure testing,
+soak, hardware evidence and controlled-flight validation before any live flip.
 
 ### S09-C — SWARM Leader Path
 
@@ -852,14 +868,15 @@ leader plus the active/excluded partition, and validation accepts a legitimately
 promoted leader while still rejecting inconsistent membership.
 
 **Open items (PRE-FLIP):** live enablement remains blocked — no `core-swarm-leader`
-token is reachable from production wiring. Round 4 must still re-check the
-asynchronous revocation/final-write-guard design for form-up, steady followers,
-RETURN/LAND, KILL and STOP ALL, and SITL/hardware validation of succession remains
-outstanding.
+token is reachable from production wiring. The fresh independent review has already
+re-checked the asynchronous revocation/final-write-guard design for form-up, steady
+followers, RETURN/LAND, KILL and STOP ALL at 0 Critical / 0 High. Authority-on SITL,
+failure injection, soak, hardware and controlled-flight validation of succession remain
+outstanding before any live flip.
 
 ### S09-D — WAVE
 
-**Status: PRE-FLIP IMPLEMENTATION EXISTS — ROUND 4 RE-REVIEW REQUIRED; authority NOT flipped.**
+**Status: PRE-FLIP IMPLEMENTATION EXISTS — FRESH INDEPENDENT REVIEW PASS; authority NOT flipped.**
 
 WAVE has **no** Core `mission.Mode`; it is a higher-level orchestration of sequential
 GROUPED runs (one per group). It is modeled as a self-contained shadow state machine
@@ -894,7 +911,7 @@ Python-owned and Core-slot-guarded (S05) in every live profile.
 
 ### S09-E — Payload / Servo A/B waypoint actions
 
-**Status: PRE-FLIP IMPLEMENTATION EXISTS — ROUND 4 RE-REVIEW REQUIRED; authority NOT flipped.**
+**Status: PRE-FLIP IMPLEMENTATION EXISTS — FRESH INDEPENDENT REVIEW PASS; authority NOT flipped.**
 
 **Characterized legacy behavior** (`app.py` `_wp_run_action`): on arrival at a
 waypoint with an action (after any WAIT):
@@ -1122,15 +1139,19 @@ V2 F8 evidence remains valuable:
 - 500 alternating terminal Engine cycles
 - bounded Core memory/thread/handle sample stable
 
-Current mandatory gate and deferred soak plan:
+Current evidence and deferred soak plan:
 
 ```text
-30 minutes  = REQUIRED NOW
-2 hours     = DEFERRED EXTENDED ENDURANCE
-6 hours     = DEFERRED EXTENDED ENDURANCE
-12 hours    = DEFERRED EXTENDED ENDURANCE
-24 hours    = OPTIONAL SOAK
+6 hours idle-connected   = PASS / CURRENT OPERATIONAL GATE
+15m reconnect-churn      = PASS
+15m client-lifecycle     = PASS
+12 hours                 = DEFERRED EXTENDED ENDURANCE
+24 hours                 = OPTIONAL SOAK
+5/10-drone long soak     = DEFERRED EXTENDED VALIDATION
+mission Start/Cancel soak= DEFERRED EXTENDED VALIDATION
 ```
+
+The earlier 30-minute minimum was superseded by the completed 6-hour run; it is no longer a pending current gate.
 
 Measure:
 
@@ -1184,26 +1205,31 @@ No actual hardware readiness is claimed here.
 
 # 16. V3-H02 — Actual FC / Airframe Bench
 
-**Status: BLOCKED — ACTUAL FC REQUIRED**
+**Status: IN PROGRESS — 5.1–5.3 PASS / 5.4–5.9 PENDING (latest evidence 2026-09-06).**
 
-This is old V2 F9B.
+This is old V2 F9B. Actual hardware is now available and the gate has started.
 
-Required real-FC evidence:
+Captured evidence:
 
-- actual parameter/config snapshot
-- GCS/Core-loss onboard failsafe configuration
-- Core↔FC COMMAND_ACK timing
-- actual telemetry timing
-- guarded Core-owned waypoint
-- Core-owned WAIT/HOLD
-- UI disconnect/reconnect
-- cancel terminal behavior
-- Core/GCS loss behavior
-- battery/link preemption where bench-safe
-- manual/E-STOP takeover
-- Core restart no auto-resume
+- actual parameter/config baseline captured; `SYSID_MYGCS=250`, `FS_GCS_ENABLE=1`, pre-arm/battery/failsafe values recorded;
+- actual telemetry timing verified at about 10 Hz with wide margin to the configured link-warning window;
+- guarded disarmed COMMAND_ACK timing captured for LOITER→GUIDED and restore;
+- operator-visible HIL follow-up reached GUIDED → ARM → DISARM;
+- a real session bearer token was issued; the secret value is intentionally not stored in documentation.
 
-SITL cannot substitute for this gate.
+Still required before H02 exit PASS:
+
+- capture a fresh post-token SYSTEM TEST result for the HIL runtime;
+- guarded Core-owned single waypoint evidence with exactly one Core mission GOTO and no concurrent Python mission GOTO;
+- Core-owned WAIT/HOLD;
+- UI disconnect/reconnect continuity for the same run;
+- Cancel terminal behavior;
+- controlled Core/GCS loss with approved onboard FC failsafe behavior — **mandatory blocker**;
+- battery/link preemption where bench-safe;
+- manual/STOP/E-STOP takeover;
+- Core restart with no auto-resume.
+
+`FENCE_ENABLE=0` is recorded and still requires explicit field-policy review before any controlled real-flight gate. SITL cannot substitute for H02, and H02 evidence does not itself unlock R01.
 
 ---
 
@@ -1256,18 +1282,16 @@ Use this table only when reading historical documents.
 
 # 19. Remaining Work — Short Answer
 
-If the question is simply **"what is actually left?"**, the remaining work is:
+If the question is simply **"what is actually left?"**, the answer as of 2026-09-06 is:
 
-1. **V3-S07** — central Command Gateway + emergency-priority/latency hardening.
-2. **V3-S08** — end-to-end command correlation and safe dedup model.
-3. **V3-S09** — migrate remaining mission modes one by one: multi-GROUPED, SEPARATE, Leader, WAVE, payload, optional rtl_after.
-4. **V3-S10** — persistence + robust UI/Core restart/recovery/lifecycle.
-5. **V3-S11** — extend failure injection over the complete architecture.
-6. **V3-S12** — long SITL endurance/performance/leak evidence.
-7. **V3-H02** — run actual FC bench when hardware is available.
-8. **V3-R01** — only then consider controlled real-flight release.
+1. **Record/complete the separate S09 PRE-FLIP administrative freeze** while keeping all deferred S09 live tokens OFF. The independent review is already PASS; do not redo S09 implementation without a proven defect.
+2. **Finish V3-H02**: 5.4 Core-owned waypoint → 5.5 WAIT/HOLD → 5.6 Cancel → 5.7 controlled Core/GCS-loss failsafe → 5.8 battery/link preemption → 5.9 manual/STOP/E-STOP takeover, plus required reconnect/restart evidence.
+3. After H02 base PASS, promote **S09 authority scopes one by one** through the full validation ladder: Multi GROUPED → SEPARATE → SWARM_LEADER → Payload → WAVE → Return Policy live validation.
+4. Run the **full-system integration + multi-drone/full-system endurance + hardware matrix** required by the intended release scope.
+5. Run the **controlled real-flight matrix** only after its prerequisites are green.
+6. **V3-R01** — explicit full-production release review; remains LOCKED until the above evidence exists.
 
-Already-completed V2 work does not need to be rebuilt. It becomes the foundation for these remaining V3 stages.
+S07, S08, S10, S11 and the current S12 operational gate are already complete and must not be reopened merely because older text still lists them as future work.
 
 ---
 
@@ -1276,23 +1300,25 @@ Already-completed V2 work does not need to be rebuilt. It becomes the foundation
 Canonical order from the current state:
 
 ```text
-V3-S06  Telemetry + lifecycle        ✅ DONE
-   ↓
-V3-S07  Command Gateway + emergency priority   ✅ DONE
-   ↓
-V3-S08  Correlation / dedup          ✅ DONE
-   ↓
-V3-S09  Mission Authority Expansion  ← IN PROGRESS / INDEPENDENT REVIEW BLOCKED
-   ↓
-V3-S10  Persistence / restartability
-   ↓
-V3-S11  Full failure injection
-   ↓
-V3-S12  SITL endurance
-   ↓
-V3-H02  Actual FC bench
-   ↓
-V3-R01  Controlled real-flight release review
+V3-S01–S08  Software foundation                         ✅ DONE
+        ↓
+V3-S09      PRE-FLIP implementation + independent review ✅ PASS / FREEZE RECORD PENDING
+        ↓
+V3-S10      Persistence / restartability                ✅ COMPLETE
+        ↓
+V3-S11      Failure injection                           ✅ COMPLETE
+        ↓
+V3-S12      Current SITL endurance gate                 ✅ COMPLETE
+        ↓
+V3-H01      Hardware bench preparation                  ✅ DONE
+        ↓
+V3-H02      Actual FC bench                             🟠 IN PROGRESS — 5.1–5.3 PASS
+        ↓
+S09 live scopes, one at a time after H02 base PASS      🔒 OFF UNTIL VALIDATED
+        ↓
+Full integration / hardware / controlled-flight matrix  ⏳ FUTURE VALIDATION
+        ↓
+V3-R01      Full Production Release Review              🔒 LOCKED
 ```
 
 `V3-H01` is already DONE and sits alongside this chain as prepared hardware tooling.
@@ -1347,7 +1373,7 @@ When reporting status in future, use examples such as:
 - `V3-S06 DONE — TelemetryStore + deterministic Qt/gRPC lifecycle`
 - `V3-S07/S08 DONE — source review plus targeted/full frozen-source regression green`
 - `V3-S09 FINAL REVIEW PASS / READY TO FREEZE — PRE-FLIP A–F exists; no authority flip`
-- `V3-H02 BLOCKED — waiting actual FC`
+- `V3-H02 IN PROGRESS — actual FC 5.1–5.3 PASS; 5.4–5.9 pending`
 - `V3-R01 LOCKED`
 
 Do not report only `F8`, `Phase 8`, or `F10` without the V3 ID.

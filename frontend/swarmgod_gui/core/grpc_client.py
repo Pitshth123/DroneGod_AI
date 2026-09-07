@@ -97,6 +97,22 @@ def _read(p):
         return f.read()
 
 
+def format_rpc_error(exc) -> str:
+    """Return a compact operator-facing gRPC error instead of ``_InactiveRpcError`` repr."""
+    if isinstance(exc, grpc.RpcError):
+        try:
+            code = exc.code()
+            code_name = getattr(code, "name", None) or str(code).rsplit(".", 1)[-1]
+        except Exception:
+            code_name = "RPC_ERROR"
+        try:
+            details = (exc.details() or "").strip()
+        except Exception:
+            details = ""
+        return f"{code_name}: {details}" if details else code_name
+    return str(exc)
+
+
 class CoreClient:
     """หุ้ม gRPC stub — mTLS ถ้ามี cert, ไม่งั้น insecure (dev)"""
 

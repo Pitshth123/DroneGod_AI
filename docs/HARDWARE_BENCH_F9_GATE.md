@@ -1,7 +1,9 @@
 # F9 Hardware Bench Gate
 
 Date prepared: 2026-08-27
-Status: **F9A PREPARATION DONE / F9B ACTUAL-FC PENDING**
+Status: **F9A PREPARATION DONE / F9B ACTUAL-FC IN PROGRESS — H02 5.1–5.3 PASS, 5.4+ PENDING (2026-09-03)**
+
+Current actual-FC checkpoint and measured evidence: `docs/H02_ACTUAL_FC_BENCH_PROGRESS_20260903.md`. This is not an F9/H02 exit PASS; waypoint/WAIT/Cancel/Core-loss/preemption/takeover evidence remains pending.
 
 F9 is intentionally split so software preparation does not wait for the real FC. F9A prepares and validates the bench tooling; F9B is the mandatory execution on the actual flight controller/airframe. SITL never substitutes for F9B.
 

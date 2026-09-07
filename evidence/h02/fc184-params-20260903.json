@@ -1,0 +1,79 @@
+{
+  "policy": "docs\\f9_expected_params.json",
+  "source": "tcp:192.168.9.184:5760",
+  "passed": false,
+  "results": [
+    {
+      "name": "SYSID_MYGCS",
+      "canonical": "MAV_GCS_SYSID",
+      "value": 250.0,
+      "status": "WARN",
+      "reason": "environment SWARMGOD_MAVLINK_SYSID not set; equality not checked",
+      "purpose": "FC must accept commands from the same GCS system id used by Core; supports current and legacy ArduPilot names"
+    },
+    {
+      "name": "FS_GCS_ENABLE",
+      "canonical": "FS_GCS_ENABLE",
+      "value": 0.0,
+      "status": "FAIL",
+      "reason": "must be non-zero for the intended bench policy",
+      "purpose": "Core/GCS disappearance must not be silently ignored by the FC"
+    },
+    {
+      "name": "ARMING_SKIPCHK",
+      "canonical": "ARMING_SKIPCHK",
+      "value": null,
+      "status": "WARN",
+      "reason": "missing",
+      "purpose": "Current ArduPilot: no global pre-arm check skip mask"
+    },
+    {
+      "name": "ARMING_CHECK",
+      "canonical": "ARMING_CHECK",
+      "value": 1.0,
+      "status": "PASS",
+      "reason": "captured",
+      "purpose": "Legacy ArduPilot: pre-arm safety checks must not be globally disabled"
+    },
+    {
+      "name": "BATT_FS_CRT_ACT",
+      "canonical": "BATT_FS_CRT_ACT",
+      "value": null,
+      "status": "FAIL",
+      "reason": "missing",
+      "purpose": "Critical battery must have an onboard action independent of the cockpit"
+    },
+    {
+      "name": "BATT_FS_LOW_ACT",
+      "canonical": "BATT_FS_LOW_ACT",
+      "value": null,
+      "status": "WARN",
+      "reason": "missing",
+      "purpose": "Captured for team review; low-battery action may depend on field policy"
+    },
+    {
+      "name": "FS_OPTIONS",
+      "canonical": "FS_OPTIONS",
+      "value": null,
+      "status": "WARN",
+      "reason": "missing",
+      "purpose": "Captured because option bits can change GCS/battery failsafe behavior"
+    },
+    {
+      "name": "FENCE_ENABLE",
+      "canonical": "FENCE_ENABLE",
+      "value": null,
+      "status": "WARN",
+      "reason": "missing",
+      "purpose": "Captured for comparison with Core geofence/radius policy"
+    },
+    {
+      "name": "ANY(ARMING_SKIPCHK,ARMING_CHECK)",
+      "canonical": "required_any",
+      "value": null,
+      "status": "PASS",
+      "reason": "present: ARMING_CHECK",
+      "purpose": "At least one supported ArduPilot pre-arm safety control must be present"
+    }
+  ]
+}

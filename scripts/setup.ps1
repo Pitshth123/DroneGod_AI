@@ -273,7 +273,7 @@ if ($script:Todo.Count -gt 0) {
 
 Write-Host ""
 if ($script:Fail -eq 0) {
-    Write-Host "  ต่อไป: ดับเบิลคลิก START_SWARMGOD.bat เพื่อเปิดใช้งาน" -ForegroundColor Cyan
+    Write-Host "  ต่อไป: ดับเบิลคลิก START_SWARMGOD_EASY.bat เพื่อเปิดใช้งานแบบอัตโนมัติ" -ForegroundColor Cyan
 }
 Write-Host ""
 exit $script:Fail

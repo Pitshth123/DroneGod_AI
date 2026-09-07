@@ -76,6 +76,44 @@ def _help_html() -> str:
         อธิบายวิธีใช้แต่ละฟีเจอร์ + แผนที่ว่าปุ่มไหนผูกกับปุ่มไหน + เงื่อนไขที่มักทำให้งง
         + Field Tablet, แผนที่ 3D, Failsafe, ความปลอดภัย, ฉุกเฉิน + วิธีแก้ปัญหา</p>
 
+    <div style="background:{rgba(c_accent, 0.08)}; border:1px solid {rgba(c_accent, 0.30)};
+                border-radius:10px; padding:12px 14px; margin:0 0 14px 0;">
+      <div style="color:{c_accent}; font-weight:900; font-size:12px; letter-spacing:0.7px;">
+        ◆ PROJECT STATUS · V3 · 2026-09-06</div>
+      <div style="color:{c_text}; font-size:14px; font-weight:800; margin-top:5px;">
+        Software foundation พร้อมมาก · Actual-FC H02 กำลังทดสอบ · Real Flight ยัง LOCKED</div>
+      <div style="color:{c_dim}; font-size:11px; line-height:1.55; margin-top:6px;">
+        S01–S08 ✅ · S09 PRE-FLIP REVIEW PASS / NO AUTHORITY FLIP · S10–S12 ✅ · H01 ✅ ·
+        H02 🟠 5.1–5.3 PASS / 5.4–5.9 PENDING · R01 🔒 LOCKED</div>
+    </div>
+
+    {h2("⚡ QUICK START — เปิดระบบให้ถูกโหมด", c_cyan)}
+    {table([
+        ["1 · PROFILE", f"{mono('setup')} = telemetry-only · {mono('hil')} = Actual-FC bench · {mono('sitl')} = simulator"],
+        ["2 · CONNECT", "เชื่อม Drone แล้วต้องเห็น telemetry จริง ไม่ใช่แค่ TCP port เปิด"],
+        ["3 · SYSTEM TEST", "ตรวจ Core + mTLS + token + profile + HOME + telemetry + GPS/BAT/LINK"],
+        ["4 · CHECKLIST", "สิ่งที่ operator ต้องตรวจด้วยตา/ขั้นตอนจริง แยกจาก machine test"],
+        ["5 · AUTHORITY", "H02 เป็น bench validation เท่านั้น — GUIDED/ARM ผ่านยังไม่เท่ากับ R01 production release"],
+    ], ["ขั้น", "ต้องดูอะไร"])}
+    {alert("ถ้า MODE GUIDED ขึ้น RPC error",
+           f"เช็ก Core log ก่อนว่าเป็น {mono('profile=hil')} จริงหรือไม่ — {mono('profile=setup')} เป็น telemetry-only "
+           "และจะปฏิเสธ SetMode/Arm/mission mutation โดยตั้งใจ ถ้า UI แสดง FAILED_PRECONDITION ให้ใช้เหตุผลจาก Core เป็นตัววินิจฉัย",
+           c_amber)}
+
+    {h2("🗺 V3 ROADMAP — สถานะปัจจุบัน", c_yellow)}
+    {table([
+        ["V3-S01–S08", f"<b style='color:{c_green}'>DONE</b>", "Foundation / telemetry / command ownership / dedup / no-dual-authority"],
+        ["V3-S09", f"<b style='color:{c_amber}'>PRE-FLIP REVIEW PASS</b>", "0 Critical / 0 High · ยังไม่ authority flip · administrative freeze ยังต้องมีหลักฐานแยก"],
+        ["V3-S10", f"<b style='color:{c_green}'>COMPLETE</b>", "Persistence + restartability / no-auto-resume"],
+        ["V3-S11", f"<b style='color:{c_green}'>COMPLETE</b>", "Failure injection / Expected Safe State"],
+        ["V3-S12", f"<b style='color:{c_green}'>CURRENT GATE COMPLETE</b>", "6h endurance + reconnect + client lifecycle PASS"],
+        ["V3-H01", f"<b style='color:{c_green}'>DONE</b>", "Hardware bench tooling ready"],
+        ["V3-H02", f"<b style='color:{c_amber}'>IN PROGRESS</b>", "Actual FC: 5.1–5.3 PASS · operator GUIDED/ARM/DISARM reached · 5.4–5.9 pending"],
+        ["V3-R01", f"<b style='color:{c_red}'>LOCKED</b>", "Controlled real-flight release ยังไม่เปิด"],
+    ], ["Stage", "Status", "ความหมาย"])}
+    {p(f"Live mission authority ตอนนี้ยังมีเฉพาะ {mono('core-single')} และ {mono('core-single-wait')} — "
+       f"multi GROUPED / SEPARATE / SWARM_LEADER / WAVE / payload ยังไม่เปิด live")}
+
     {h2("ก่อนบินจริง — PRE-FLIGHT TEST", c_amber)}
     {p("หมวดบนสุดของแผงขวา มี 2 ปุ่มที่ต้องผ่านก่อนปล่อยบินจริง "
        "ป้าย PREFLIGHT อยู่หัวแผง FLEET ข้าง ONLINE "
@@ -437,9 +475,13 @@ def _help_html() -> str:
 
     {h2("แก้ปัญหาเบื้องต้น (Troubleshooting)", c_amber)}
     {table([
-        ["Badge ค้าง OFFLINE", "ตรวจ IP/port · FC เปิดอยู่ไหม · ลอง PING"],
+        ["Badge ค้าง OFFLINE", "ตรวจ IP/port · FC เปิดอยู่ไหม · ลอง PING · แล้วดูว่ามี Drone reader started และ telemetry จริงหรือยัง"],
+        [f"MODE GUIDED · {mono('_InactiveRpcError')}", f"เช็ก startup log: {mono('profile=setup')} จะปฏิเสธ flight mutation โดยตั้งใจ · HIL bench ต้องเป็น profile=hil และผ่าน interlock"],
+        ["แจ้ง IP ซ้ำ", "แยก LAN duplicate ออกจาก Cockpit session duplicate — saved endpoint ใน SQLite ไม่ได้แปลว่ายัง connected; ถ้าไม่มี reader/telemetry ให้ตรวจ endpoint reservation/card state ก่อนเปลี่ยน IP FC"],
+        ["HIL เปิดแล้ว telemetry = 0", "เช็กว่า Drone ถูก CONNECT จริง · endpoint ถูก · log มี reader started · ping/TCP เปิดอย่างเดียวไม่พอ"],
+        ["SYSTEM TEST ติด token", f"ต้องตั้ง {mono('SWARMGOD_TOKEN')} จริงใน shell เดียวกับที่เปิด Cockpit แล้ว restart · ห้ามใส่ token/password ใน log หรือ Git"],
         ["SAT ขึ้นน้อย / ไม่ล็อก 3D", "รอ 30–60 วิ ที่กลางแจ้ง"],
-        ["ARM ถูกปฏิเสธ", "ดู toast/Mission Log — EKF/GPS/BAT ไม่ผ่าน"],
+        ["ARM ถูกปฏิเสธ", "ดู toast/Mission Log — EKF/GPS/BAT/pre-arm/profile/ownership อาจไม่ผ่าน อย่ากดซ้ำแบบเดา"],
         ["กดปุ่มไม่ติด", "อาจอยู่โหมด REMOTE → สลับกลับ UI"],
         ["เปลี่ยน Head ไม่ได้", "กำลัง RTL/TAKEOFF/LANDING/Swarm → รอจนนิ่ง"],
         [f"{mono('UNIMPLEMENTED')} method", "Core binary เก่า → rebuild + restart"],
@@ -459,11 +501,15 @@ def _help_html() -> str:
     {h2("คู่มือฉบับเต็ม")}
     {p(f"เอกสารนี้ครอบคลุมฟีเจอร์หลัก ๆ ในระบบ สำหรับรายละเอียดเพิ่มเติมดูที่:")}
     {table([
-        [f"{mono('docs/MANUAL.md')}", "คู่มือฉบับสมบูรณ์ทุกหัวข้อ"],
+        [f"{mono('docs/HELP.md')}", "คู่มือหน้างาน + Project/V3 status + troubleshooting ฉบับอ่านง่าย"],
+        [f"{mono('docs/V3_MASTER_ROADMAP.md')}", "Canonical V3 roadmap — ใช้ไฟล์นี้ตัดสินสถานะปัจจุบัน"],
+        [f"{mono('docs/V3_FULL_PRODUCTION_VALIDATION_PLAN.md')}", "ลำดับ validation จาก H02 ไปจน R01"],
+        [f"{mono('docs/H02_ACTUAL_FC_BENCH_PROGRESS_20260903.md')}", "หลักฐาน Actual-FC H02 ล่าสุด"],
+        [f"{mono('docs/MANUAL.md')}", "คู่มือฟังก์ชันฉบับสมบูรณ์"],
         [f"{mono('docs/ARCHITECTURE.md')}", "สถาปัตยกรรมระบบ 3 ชั้น"],
-        [f"{mono('docs/SECURITY.md')}", "รายละเอียดความปลอดภัย 6 ชั้น"],
-        [f"{mono('docs/RUNBOOK.md')}", "วิธีรัน + Pre-flight โดรนจริง"],
-        [f"{mono('docs/REAL_FLIGHT_CHECKLIST.md')}", "เช็คลิสต์ก่อนบินจริง"],
+        [f"{mono('docs/SECURITY.md')}", "รายละเอียดความปลอดภัย"],
+        [f"{mono('docs/RUNBOOK.md')}", "วิธีรัน + operation runbook"],
+        [f"{mono('docs/REAL_FLIGHT_CHECKLIST.md')}", "เช็คลิสต์สำหรับ release scope ที่ได้รับอนุมัติ"],
         [f"{mono('docs/FIELD_TABLET_V2.md')}", "สเปกแท็บเล็ตสนามฉบับเต็ม"],
     ], ["ไฟล์", "เนื้อหา"])}
 
@@ -478,7 +524,7 @@ class HelpDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("คู่มือการใช้งาน — SwarmGod Cockpit")
         self.setModal(True)
-        self.resize(760, 660)
+        self.resize(920, 760)
         self.setStyleSheet(f"QDialog {{ background:{T('bg')}; }}")
 
         v = QVBoxLayout(self)

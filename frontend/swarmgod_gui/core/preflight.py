@@ -168,12 +168,21 @@ def evaluate_static(snap: dict) -> List[CheckResult]:
         ("ต่ำกว่าเกณฑ์: " + ", ".join(low)) if low
         else ("ใกล้เกณฑ์: " + ", ".join(warn_b)) if warn_b else "ทุกลำเพียงพอ"))
 
-    airborne = [d["id"] for d in drones
-                if d.get("armed") or float(d.get("alt", 0.0)) > _lim(snap, "ground_alt_m")]
+    armed = [d["id"] for d in drones if d.get("armed")]
+    # Relative altitude comes from the FC's barometer/home origin and commonly
+    # drifts a few metres while a disarmed aircraft is physically on the bench.
+    # A fresh disarmed state is authoritative for the command test; retain an
+    # altitude warning so the operator still sees an unexpected origin offset.
+    high_disarmed = [d["id"] for d in drones
+                     if not d.get("armed")
+                     and float(d.get("alt", 0.0)) > _lim(snap, "ground_alt_m")]
     out.append(_res(
         "ready.grounded", "ทุกลำ disarm และอยู่บนพื้น (ก่อนเริ่มเทส)", "READY", CRITICAL,
-        FAIL if airborne else PASS,
-        "ยัง armed/ลอยอยู่: " + _names(drones, airborne) if airborne else "อยู่บนพื้นครบ"))
+        FAIL if armed else (WARN if high_disarmed else PASS),
+        "ยัง armed อยู่: " + _names(drones, armed) if armed
+        else ("disarm ครบ แต่ alt_rel สูงกว่าเกณฑ์ (barometer/home drift): "
+              + _names(drones, high_disarmed)) if high_disarmed
+        else "disarm และค่าความสูงอยู่ในเกณฑ์พื้นครบ"))
 
     no_pos = [d["id"] for d in drones
               if float(d.get("lat", 0.0)) == 0.0 and float(d.get("lon", 0.0)) == 0.0]

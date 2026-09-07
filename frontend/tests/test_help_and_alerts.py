@@ -49,6 +49,8 @@ class HelpDialogTests(unittest.TestCase):
         for kw in (
             "Waypoint", "GROUPED", "SEPARATE", "RTL", "Emergency",
             "REMOTE", "Head", "ไม่ใช่บั๊ก", "ไปที่ GPS", "CACHE AREA",
+            "V3 ROADMAP", "V3-H02", "IP ซ้ำ", "_InactiveRpcError",
+            "SWARMGOD_TOKEN", "docs/HELP.md",
         ):
             self.assertIn(kw, html, f"missing keyword in help html: {kw}")
 

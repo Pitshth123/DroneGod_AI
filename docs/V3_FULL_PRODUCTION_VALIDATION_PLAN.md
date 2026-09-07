@@ -1,7 +1,7 @@
 # DroneGod_AI — Full Production Validation Plan
 
 Date: 2026-08-30
-Status: **S09 FINAL REVIEW PASS — READY FOR PRE-FLIP FREEZE / H02 AFTER FREEZE**
+Status: **H02 ACTUAL-FC BENCH IN PROGRESS — 5.1–5.3 PASS / 5.4–5.9 PENDING; S09 AUTHORITY NOT FLIPPED**
 
 ## Recall / Trigger Phrase
 
@@ -13,7 +13,7 @@ then open and use **this file** (`docs/V3_FULL_PRODUCTION_VALIDATION_PLAN.md`) a
 Do not restart S01–S12, do not invent a new validation order, and do not open multiple new authority scopes at once.
 Start from the next applicable step in this roadmap, beginning with the Actual FC bench validation when the hardware is ready.
 
-Active project: `C:\Users\PC\Desktop\v2 swam\DroneGod_AI`
+Active project: `C:\Users\staff\OneDrive\Desktop\DroneNew`
 Canonical roadmap: `docs/V3_MASTER_ROADMAP.md`
 
 > Purpose: เก็บแผนพิสูจน์ระบบแบบครบเส้นทางตั้งแต่ Actual FC Bench ไปจนถึง Full Production Release เพื่อให้เมื่อ Flight Controller พร้อม สามารถเปิดเอกสารนี้แล้วเริ่มตามลำดับได้ทันที โดยไม่ต้องย้อนอ่านบทสนทนาเก่า
@@ -46,14 +46,14 @@ The following remain OFF until separately validated:
 - `core-wave`
 - `core-payload`
 
-Current administrative gate before hardware:
+Current administrative / hardware note:
 
 - Fresh Independent PRE-FLIP Re-review is complete with `FINAL REVIEW PASS` and **0 Critical / 0 High**.
-- Perform the separate administrative **S09 PRE-FLIP software baseline freeze**.
-- Freeze is evidence/baseline only and does **not** authorize any S09 authority flip.
-- Do not start H02 as an S09 expansion task and do not widen live authority during freeze.
+- A separate administrative **S09 PRE-FLIP software baseline freeze** is still the intended evidence step; no document currently proves that this administrative freeze was completed.
+- H02 actual-FC baseline work nevertheless has already started under the existing narrow `core-single` / `core-single-wait` scope. This does **not** authorize any deferred S09 authority flip.
+- Keep every deferred S09 live token OFF while H02 is in progress. Record the freeze separately without rewriting already-passed software unless a proven defect appears.
 
-Intentionally unresolved:
+PRE-FLIP contracts resolved, live validation still pending:
 
 - SWARM_LEADER operator-takeover / leader-succession policy = **RATIFIED / PRE-FLIP IMPLEMENTED / FRESH REVIEW PASS (2026-08-30); later live authority validation pending**
 - S09-F Return Policy = **RATIFIED / PRE-FLIP IMPLEMENTED / FRESH REVIEW PASS; later live authority validation pending**
@@ -182,6 +182,17 @@ Prove the already-mature `core-single` and `core-single-wait` paths against the 
 - Use HIL/bench guard only.
 - No real flight in H02.
 - Capture original FC parameters before changing anything.
+
+## Current H02 evidence stamp — 2026-09-06
+
+- **5.1 FC parameter/config snapshot:** PASS for the minimum H02 baseline; field fence policy still requires review before controlled flight.
+- **5.2 Real telemetry timing:** PASS at approximately 10 Hz with link/timing evidence captured.
+- **5.3 COMMAND_ACK timing:** PASS for guarded disarmed LOITER→GUIDED and restore.
+- **Operator-visible prerequisite checks:** GUIDED → ARM → DISARM reached; no Takeoff/real flight claimed.
+- **Authentication:** a real 12-hour session bearer token was issued; its secret value is intentionally absent from documentation. Fresh post-token SYSTEM TEST evidence still needs capture.
+- **5.4–5.9:** PENDING. 5.7 controlled Core/GCS-loss behavior remains a mandatory blocker.
+
+Canonical measured evidence: `docs/H02_ACTUAL_FC_BENCH_PROGRESS_20260903.md`.
 
 ## Required tests
 
@@ -799,19 +810,19 @@ Do not use “all tests green” alone as the definition of production readiness
 
 ---
 
-# 19. Exact Next Step When FC Becomes Available
+# 19. Exact Next Step — Current H02 In Progress
 
-When the user says the actual FC is ready:
+The FC is already available and H02 has started. Continue from the evidence, do not restart the completed baseline:
 
-1. Open this file: `docs/V3_FULL_PRODUCTION_VALIDATION_PLAN.md`.
-2. Open `docs/HARDWARE_BENCH_F9_GATE.md`.
-3. Confirm actual hardware bench safety (props removed / approved bench setup).
-4. Capture original FC parameter snapshot before modifying anything.
-5. Start **STEP 1 — V3-H02-A Actual FC Base Validation** using only `core-single` / `core-single-wait`.
-6. Do not flip S09 authority during the initial hardware baseline.
-7. Record evidence and exact failures.
-8. Repair only proven defects.
-9. After H02-A base is green, proceed to S09-A Multi GROUPED according to this document.
+1. Open `docs/H02_ACTUAL_FC_BENCH_PROGRESS_20260903.md` and preserve its last positively verified state/evidence.
+2. For each new bench session, freshly confirm the approved physical bench condition; do not reuse an old physical confirmation automatically.
+3. Confirm HIL Core/Cockpit runtime and capture a fresh SYSTEM TEST result with mTLS + real session token + `profile=hil` + HOME accepted.
+4. Re-establish Drone 1 telemetry and verify link/GPS/battery/state before any H02 mutation test.
+5. Resume **5.4 Core-owned single waypoint** and capture exactly-one-Core-GOTO / no-concurrent-Python-GOTO evidence.
+6. Then execute in order: **5.5 WAIT/HOLD → 5.6 Cancel → 5.7 controlled Core/GCS loss → 5.8 battery/link preemption → 5.9 manual/STOP/E-STOP takeover**.
+7. Repair only proven defects and rerun only affected gates.
+8. Keep every deferred S09 live token OFF during the H02 base gate.
+9. Only after H02-A base is green proceed to S09-A Multi GROUPED according to this document.
 
 ---
 
@@ -821,4 +832,4 @@ We are not waiting for the FC because software work was incomplete. The software
 
 After that baseline is proven, the advanced S09 scopes are promoted one at a time. This prevents a bug in Multi/Swarm/WAVE/Payload from being mixed together and preserves the safety properties already established over the previous migration/testing campaign.
 
-**Next physical gate when FC is ready: V3-H02-A Actual FC Base — Single + WAIT first.**
+**Current physical gate: V3-H02-A Actual FC Base — IN PROGRESS; finish the remaining single + WAIT bench evidence before opening any new live authority scope.**

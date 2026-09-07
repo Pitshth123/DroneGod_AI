@@ -112,6 +112,38 @@ func (s *Store) CreateUser(username, password, role string) (*User, error) {
 	return &User{ID: id, Username: username, Role: role, Created: now}, nil
 }
 
+// ResetUserPassword replaces a local user's password and revokes all existing sessions.
+// It is used by the local swarmadmin recovery command, which has direct DB access.
+func (s *Store) ResetUserPassword(username, password string) error {
+	if len(password) < 8 {
+		return ErrWeakPassword
+	}
+	hash, err := hashPassword(password)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	r, err := tx.Exec(`UPDATE users SET pw_hash = ? WHERE username = ?`, hash, username)
+	if err != nil {
+		return err
+	}
+	n, err := r.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrAuthFailed
+	}
+	if _, err := tx.Exec(`UPDATE sessions SET revoked = 1 WHERE user_id = (SELECT id FROM users WHERE username = ?)`, username); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // Authenticate ตรวจ username/password — คืน User ถ้าผ่าน
 // หมายเหตุ: เพื่อกัน user-enumeration/timing, verify hash ปลอมเสมอเมื่อไม่พบ user
 func (s *Store) Authenticate(username, password string) (*User, error) {

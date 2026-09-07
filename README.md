@@ -44,7 +44,15 @@ SwarmGod/
 
 ## เริ่มใช้งาน — กดปุ่มเดียว ✅
 
-**ดับเบิลคลิก `START_SWARMGOD.bat`** → Launcher จะจัดการให้ครบ (certs → build → core → SITL → cockpit)
+**แนะนำ: ดับเบิลคลิก `START_SWARMGOD_EASY.bat`** → ตรวจ dependencies, สร้าง local
+session token และเปิด Launcher ให้อัตโนมัติ โดยไม่ต้องกรอกรหัสหรือคัดลอก token
+
+`START_SWARMGOD.bat` ยังใช้เปิด Launcher แบบเดิมได้ รายละเอียดการย้ายคอมอยู่ที่
+[`docs/MOVE_TO_NEW_PC.md`](docs/MOVE_TO_NEW_PC.md)
+และรายการสิ่งที่เพิ่มทั้งหมดอยู่ที่
+[`docs/AUTOMATIC_AUTH_PC_MIGRATION_CHANGELOG.md`](docs/AUTOMATIC_AUTH_PC_MIGRATION_CHANGELOG.md)
+
+Launcher จะจัดการให้ครบ (certs → build → core → SITL → cockpit)
 พร้อม checklist โชว์สถานะสดจน "พร้อมใช้งาน" แล้ว cockpit เด้งขึ้นมาให้ใช้ทันที
 (ปุ่ม STOP ALL ปิดทุกอย่างในคลิกเดียว · เอาเครื่องหมาย "ใช้ SITL" ออกถ้าจะต่อโดรนจริง)
 

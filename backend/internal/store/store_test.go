@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -91,6 +92,31 @@ func TestUsersAuth(t *testing.T) {
 	}
 	if _, err := s.Authenticate("nobody", "whatever here"); err != ErrAuthFailed {
 		t.Fatalf("unknown user: got %v, want ErrAuthFailed", err)
+	}
+}
+
+func TestResetUserPassword(t *testing.T) {
+	s := openTest(t)
+	u, err := s.CreateUser("alice", "original password", "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := s.CreateSession(u.ID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResetUserPassword("alice", "replacement password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Authenticate("alice", "original password"); err != ErrAuthFailed {
+		t.Fatalf("old password: got %v, want ErrAuthFailed", err)
+	}
+	if _, err := s.Authenticate("alice", "replacement password"); err != nil {
+		t.Fatalf("new password: %v", err)
+	}
+	parts := strings.Split(sess.Bearer(), ".")
+	if _, err := s.ValidateSession(parts[0], parts[1]); err != ErrSessionInvalid {
+		t.Fatalf("old session: got %v, want ErrSessionInvalid", err)
 	}
 }
 

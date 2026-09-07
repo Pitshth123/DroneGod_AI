@@ -99,11 +99,12 @@ class TestStaticChecks(unittest.TestCase):
         self.assertEqual(res["ready.battery"].status, pf.WARN)
         self.assertFalse(res["ready.battery"].blocking)
 
-    def test_armed_or_airborne_blocks(self):
+    def test_armed_blocks_but_disarmed_altitude_drift_warns(self):
         res = _by_key(pf.evaluate_static(_snap(drones=[_drone(armed=True)])))
         self.assertTrue(res["ready.grounded"].blocking)
         res = _by_key(pf.evaluate_static(_snap(drones=[_drone(alt=12.0)])))
-        self.assertTrue(res["ready.grounded"].blocking)
+        self.assertEqual(res["ready.grounded"].status, pf.WARN)
+        self.assertFalse(res["ready.grounded"].blocking)
 
     def test_missing_token_only_matters_in_real_flight(self):
         res = _by_key(pf.evaluate_static(_snap(token=False)))

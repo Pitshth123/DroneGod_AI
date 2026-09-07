@@ -1,16 +1,14 @@
 # V3-S12 — SITL Endurance + Performance
 
-**Status: V3-S12 TOOLING COMPLETE / CURRENT 30-MINUTE GATE PENDING (policy updated 2026-08-29).**
+**Status: V3-S12 CURRENT OPERATIONAL GATE COMPLETE (verified 2026-08-30).**
 
-No 30-minute, 2-hour, 6-hour, 12-hour, or 24-hour result is claimed here yet.
+The earlier 30-minute minimum was superseded by a longer completed validation campaign:
 
-**Current project-time decision:** only the **30-minute endurance run** is required
-now. After that run passes and its evidence is reviewed, the project may continue
-to the next necessary work. The 2h/6h/12h durations remain documented and runnable,
-but are **DEFERRED EXTENDED ENDURANCE** to be executed later when the complete system
-is ready and the user explicitly requests the longer validation. The optional 24h
-run remains a soak test only. This policy does not weaken or change mission authority
-or flight-safety semantics; it only changes when extended endurance evidence is run.
+- `idle-connected` **6h PASS** — `21,600.172 s`, `216,002 telemetry`, `723 RPC`, `0 RPC errors`, `0 stream errors`, `0 UI stalls`;
+- `reconnect-churn` **15m PASS** — `15 reconnects`, `9,002 telemetry`, `0 RPC/stream errors`;
+- `client-lifecycle` **15m PASS** — `75 create/snapshot/close` cycles, `9,003 telemetry`, `0 RPC/stream errors`.
+
+One transient `SQLITE_BUSY` registry-upsert warning was observed during the 6h run without service interruption; it remains a non-blocking contention follow-up. The 12h/24h durations, long 5/10-drone campaigns and prepared-airborne mission Start/Cancel endurance remain **DEFERRED EXTENDED VALIDATION**, not current project blockers. This policy does not weaken mission authority or flight-safety semantics.
 
 This stage did not start V3-H02 or V3-R01 and did not use real hardware.
 
@@ -387,5 +385,7 @@ unexecuted durations into PASS evidence.
 
 Only `core-single` and `core-single-wait` remain live. The harness explicitly
 refuses `core-grouped-multi`, `core-separate`, `core-swarm-leader`, `core-wave`,
-and `core-payload`. S09 authority is not flipped. SWARM_LEADER follower takeover
-remains DECISION REQUIRED and `rtl_after` remains BLOCKED/undefined.
+and `core-payload`. S09 authority is not flipped. The later 2026-08-30 S09 work
+superseded the older policy notes: SWARM follower/leader takeover + succession and
+the Return Policy / `rtl_after` contract are now RATIFIED + PRE-FLIP implemented +
+review-passed, but their live authority validation/flip remains pending.

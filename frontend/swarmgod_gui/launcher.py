@@ -452,7 +452,8 @@ class LauncherWindow(QWidget):
         except Exception:
             pass
         self._build()
-        self._set_mode(True)
+        requested_profile = os.getenv("SWARMGOD_PROFILE", "").strip().lower()
+        self._set_mode(requested_profile not in ("setup", "hil", "production"))
         _c = os.getenv("SWARMGOD_LAUNCHER_COUNT")
         if _c:
             try:
@@ -460,7 +461,7 @@ class LauncherWindow(QWidget):
             except ValueError:
                 pass
         self._refresh_count()
-        if os.getenv("SWARMGOD_LAUNCHER_AUTO"):
+        if os.getenv("SWARMGOD_LAUNCHER_AUTO") or os.getenv("SWARMGOD_LAUNCHER_AUTOSTART"):
             QTimer.singleShot(300, self._start)
 
     def _build(self):
