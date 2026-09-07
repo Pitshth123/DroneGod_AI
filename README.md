@@ -52,6 +52,36 @@ session token และเปิด Launcher ให้อัตโนมัต�
 และรายการสิ่งที่เพิ่มทั้งหมดอยู่ที่
 [`docs/AUTOMATIC_AUTH_PC_MIGRATION_CHANGELOG.md`](docs/AUTOMATIC_AUTH_PC_MIGRATION_CHANGELOG.md)
 
+### 🖥️ ย้ายไปคอมเครื่องใหม่ + ใช้ Flight Controller จริง (ลำดับที่แนะนำ)
+
+> **จำเพียง 2 ไฟล์หลัก:** `START_SWARMGOD_EASY.bat` สำหรับเปิดระบบปกติ และ
+> `RESTART_SWARMGOD_HIL_AUTHED.cmd` สำหรับเปลี่ยนจาก setup/telemetry ไปเป็น authenticated HIL หลังได้ HOME สดจาก FC แล้ว
+
+1. Clone/คัดลอกโปรเจกต์ลงเครื่องใหม่
+2. **คัดลอกโฟลเดอร์ `certs` จากเครื่องที่ได้รับอนุญาตมาก่อน** โดยต้องมี
+   `ca.crt`, `server.crt`, `server.key`, `client.crt`, `client.key`, `mavlink_key`
+   - ไฟล์เหล่านี้ไม่อยู่ใน Git เพราะ `.gitignore` ป้องกัน private key/certificate
+   - สำหรับ FC จริง อย่าใช้ cert ที่สร้างใหม่แทนชุดที่จับคู่กับระบบเดิมโดยไม่ตั้งใจ
+3. ครั้งแรกแนะนำให้รัน `SETUP.bat` แล้วเลือก **[2] ตรวจ + ติดตั้งสิ่งที่ขาด**
+4. ดับเบิลคลิก `START_SWARMGOD_EASY.bat`
+   - สร้างฐานข้อมูลประจำเครื่องใน `%LOCALAPPDATA%\SwarmGod\data`
+   - สร้าง/กู้ `admin` credential แบบสุ่มและเข้ารหัสด้วย Windows DPAPI
+   - ออก `SWARMGOD_TOKEN` อายุ 12 ชั่วโมงให้อัตโนมัติ
+   - ส่ง token ให้ Launcher/Core/Cockpit โดยผู้ใช้ไม่ต้องคัดลอก token เอง
+5. ใน Launcher เลือก **โดรนจริง** → START → Connect FC ขณะ **DISARM** และอยู่บนพื้น
+6. รอให้ telemetry สด, GPS fix ใช้งานได้ และพิกัดจริงถูกตรวจยืนยัน
+7. ดับเบิลคลิก `RESTART_SWARMGOD_HIL_AUTHED.cmd`
+   - จับ HOME สดจาก FC ที่ DISARM
+   - ออก token ใหม่ให้อัตโนมัติ
+   - ตั้ง `SWARMGOD_PROFILE=hil` + `SWARMGOD_HOME_LOC`
+   - รีสตาร์ต SwarmGod แล้วเปิด Cockpit ใหม่อัตโนมัติ
+8. หลัง HIL เปิดแล้วให้ตรวจ `SYSTEM TEST` ก่อนใช้งาน bench/actual-FC ต่อ
+
+**`OPEN_SWARMGOD_TOKEN_SHELL.cmd` ไม่ใช่ไฟล์ที่ต้องรันก่อนทุกครั้ง** — ใช้เฉพาะงาน manual/admin/debug เพื่อเปิด PowerShell ที่มี token พร้อมใช้งาน ส่วน `START_SWARMGOD_AUTHED.cmd` เป็น compatibility launcher ที่ส่งต่อไป `START_SWARMGOD_EASY.bat`
+
+ดู flow เต็ม, วิธีแก้ปัญหา และตำแหน่งข้อมูลประจำเครื่องใน
+[`docs/MOVE_TO_NEW_PC.md`](docs/MOVE_TO_NEW_PC.md)
+
 Launcher จะจัดการให้ครบ (certs → build → core → SITL → cockpit)
 พร้อม checklist โชว์สถานะสดจน "พร้อมใช้งาน" แล้ว cockpit เด้งขึ้นมาให้ใช้ทันที
 (ปุ่ม STOP ALL ปิดทุกอย่างในคลิกเดียว · เอาเครื่องหมาย "ใช้ SITL" ออกถ้าจะต่อโดรนจริง)
