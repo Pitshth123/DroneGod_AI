@@ -2,6 +2,12 @@
 
 วันที่จัดทำ: 6 กันยายน 2026
 
+## อัปเดตการกู้บัญชีอัตโนมัติ — 9 กันยายน 2026
+
+แก้กรณีฐานข้อมูลประจำเครื่องถูกสร้างใหม่หรือไม่มี user `admin` แต่ไฟล์ DPAPI credential เดิมยังอยู่ ก่อนหน้านี้ Easy Start จะลอง login แล้วเรียก `user reset-password admin` ซึ่งล้มเหลวเมื่อ user ไม่มีอยู่จริง ทำให้ขึ้น `store: invalid username or password` และ `Password recovery failed.`
+
+ตอนนี้ `scripts/Set-SwarmGodToken.ps1` ใช้ recovery แบบ **create-or-reset**: ถ้า `admin` ไม่มีจะสร้างใหม่ด้วยรหัสสุ่มที่ป้องกันด้วย DPAPI; ถ้า `admin` มีอยู่จะ rotate password และ revoke session เดิม จากนั้นออก token 12 ชั่วโมงใหม่อัตโนมัติ ผู้ใช้ไม่ต้องลบฐานข้อมูล ไม่ต้องรู้รหัสเดิม และไม่ต้องคัดลอก token ด้วยมือ
+
 เอกสารนี้สรุปการเปลี่ยนแปลงที่เพิ่มขึ้นเพื่อให้ SwarmGod ย้ายไปใช้บนคอมพิวเตอร์
 Windows เครื่องใหม่ได้ง่าย ผู้ใช้งานไม่ต้องสร้างบัญชีเอง ไม่ต้องจำรหัสผ่าน และไม่ต้อง
 คัดลอก session token ไปใส่ใน environment ด้วยตนเอง

@@ -24,6 +24,33 @@ function New-RandomSecurePassword {
     return ConvertTo-SecureString ([Convert]::ToBase64String($randomBytes)) -AsPlainText -Force
 }
 
+function Set-OrCreateLocalAdmin([Security.SecureString]$SecurePassword) {
+    $env:SWARMGOD_NEW_PASSWORD = [Net.NetworkCredential]::new('', $SecurePassword).Password
+    $createErrorFile = [IO.Path]::GetTempFileName()
+    try {
+        $ErrorActionPreference = 'Continue'
+        & go run ./cmd/swarmadmin user add admin operator 2> $createErrorFile
+        $createExitCode = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        $createError = Get-Content -LiteralPath $createErrorFile -Raw
+    } finally {
+        $ErrorActionPreference = 'Stop'
+        Remove-Item -LiteralPath $createErrorFile -ErrorAction SilentlyContinue
+    }
+
+    if ($createExitCode -eq 0) {
+        Write-Host 'Created local admin account for this SwarmGod database.'
+        return
+    }
+    if ($createError -notmatch 'username already exists') {
+        throw "Account recovery failed: $createError"
+    }
+
+    Write-Host 'Local admin already exists; rotating it to a new protected random password.'
+    & go run ./cmd/swarmadmin user reset-password admin
+    if ($LASTEXITCODE -ne 0) { throw 'Password recovery failed.' }
+}
+
 Push-Location $backend
 try {
     $env:SWARMGOD_DB = $Database
@@ -39,28 +66,11 @@ try {
         New-Item -ItemType Directory -Path $secretDir -Force | Out-Null
         # Save before account creation so a later session failure remains recoverable.
         $securePassword | ConvertFrom-SecureString | Set-Content -LiteralPath $passwordFile -NoNewline
-        $env:SWARMGOD_NEW_PASSWORD = [Net.NetworkCredential]::new('', $securePassword).Password
-        $createErrorFile = [IO.Path]::GetTempFileName()
         try {
-            $ErrorActionPreference = 'Continue'
-            & go run ./cmd/swarmadmin user add admin operator 2> $createErrorFile
-            $createExitCode = $LASTEXITCODE
-            $ErrorActionPreference = 'Stop'
-            $createError = Get-Content -LiteralPath $createErrorFile -Raw
-        } finally {
-            $ErrorActionPreference = 'Stop'
-            Remove-Item -LiteralPath $createErrorFile -ErrorAction SilentlyContinue
-        }
-        if ($createExitCode -ne 0) {
-            Remove-Item -LiteralPath $passwordFile
-            if ($createError -match 'username already exists') {
-                Write-Host 'admin already exists; resetting it to a new protected random password.'
-                & go run ./cmd/swarmadmin user reset-password admin
-                if ($LASTEXITCODE -ne 0) { throw 'Password recovery failed.' }
-                $securePassword | ConvertFrom-SecureString | Set-Content -LiteralPath $passwordFile -NoNewline
-            } else {
-                throw "Account creation failed: $createError"
-            }
+            Set-OrCreateLocalAdmin $securePassword
+        } catch {
+            Remove-Item -LiteralPath $passwordFile -ErrorAction SilentlyContinue
+            throw
         }
     }
     $env:SWARMGOD_NEW_PASSWORD = [Net.NetworkCredential]::new('', $securePassword).Password
@@ -69,11 +79,9 @@ try {
     $sessionExitCode = $LASTEXITCODE
     $ErrorActionPreference = 'Stop'
     if ($sessionExitCode -ne 0) {
-        Write-Host 'Saved admin credential is invalid; recovering it automatically.'
+        Write-Host 'Saved admin credential is invalid or the local admin is missing; recovering it automatically.'
         $securePassword = New-RandomSecurePassword
-        $env:SWARMGOD_NEW_PASSWORD = [Net.NetworkCredential]::new('', $securePassword).Password
-        & go run ./cmd/swarmadmin user reset-password admin
-        if ($LASTEXITCODE -ne 0) { throw 'Password recovery failed.' }
+        Set-OrCreateLocalAdmin $securePassword
         $securePassword | ConvertFrom-SecureString | Set-Content -LiteralPath $passwordFile -NoNewline
         $issuedToken = & go run ./cmd/swarmadmin session new admin 12
         if ($LASTEXITCODE -ne 0) { throw 'Session creation failed after password recovery.' }
