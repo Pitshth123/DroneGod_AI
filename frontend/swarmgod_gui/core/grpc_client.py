@@ -260,9 +260,18 @@ class CoreClient:
         return self.stub.SwarmControl(swarm_pb2.SwarmControlRequest(
             action=swarm_pb2.SwarmControlRequest.START), timeout=15)
 
-    def swarm_stop(self):
+    def swarm_stop(self, ids=None):
         return self.stub.SwarmControl(swarm_pb2.SwarmControlRequest(
-            action=swarm_pb2.SwarmControlRequest.STOP), timeout=15)
+            action=swarm_pb2.SwarmControlRequest.STOP,
+            drone_ids=[int(i) for i in (ids or [])]), timeout=15)
+
+    def swarm_take_control(self, drone_id):
+        """Atomically detach one active SWARM member before individual control.
+
+        This is an ownership transition only; Core emits no movement command here.
+        The next explicit operator command decides what the detached aircraft does.
+        """
+        return self.swarm_stop([int(drone_id)])
 
     def swarm_return(self, ids=None, base_alt=15.0, gap=5.0):
         return self.stub.SwarmControl(swarm_pb2.SwarmControlRequest(

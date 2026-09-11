@@ -942,8 +942,30 @@ func (s *Server) RcMove(ctx context.Context, req *pb.RcMoveRequest) (*pb.Command
 	ids := targetIDs(req.Target)
 	return s.runNormalBatch(ctx, "RcMove", "", ids,
 		func(c context.Context, id uint32) *pb.CommandResult {
+			if rejected := s.formationFollowerMoveReject(id, req.Dir); rejected != nil {
+				return rejected
+			}
 			return s.cmd.RcMove(c, id, req.Dir, req.Speed, req.YawRate)
 		}), nil
+}
+
+// formationFollowerMoveReject refuses manual MOVE to an aircraft the formation
+// loop still owns as a follower — the loop would drag it back every tick.
+// RC_DIR_STOP always passes: stopping must never be blocked by ownership.
+func (s *Server) formationFollowerMoveReject(id uint32, dir pb.RcDirection) *pb.CommandResult {
+	if s.swarm == nil || dir == pb.RcDirection_RC_DIR_STOP {
+		return nil
+	}
+	owned, leader := s.swarm.FormationOwnsFollower(id)
+	if !owned {
+		return nil
+	}
+	return &pb.CommandResult{
+		Ok: false, Command: "RcMove", DroneId: id,
+		Outcome: pb.CommandOutcome_OUTCOME_SAFETY_REJECTED,
+		Message: fmt.Sprintf("Drone %d is a SWARM follower of leader Drone %d — "+
+			"MOVE the leader, or TAKE CONTROL Drone %d first", id, leader, id),
+	}
 }
 
 func (s *Server) StopAll(ctx context.Context, req *pb.StopAllRequest) (*pb.CommandResult, error) {
@@ -1087,7 +1109,61 @@ func (s *Server) SwarmControl(ctx context.Context, req *pb.SwarmControlRequest) 
 			return &pb.CommandResult{Ok: true, Command: "SwarmReturn",
 				Message: "กลับฐาน+ลงจอดกันชน...", RequestId: req.RequestId}
 		}), nil
-	default: // HOLD / STOP
+	case pb.SwarmControlRequest_STOP:
+		// Targeted STOP is the explicit TAKE CONTROL transition used by the Cockpit.
+		// It changes ownership only; it does not emit a flight/navigation command.
+		// Empty drone_ids preserves the historical whole-formation STOP behavior.
+		if len(req.DroneIds) > 0 {
+			if len(req.DroneIds) != 1 || req.DroneIds[0] == 0 {
+				return &pb.CommandResult{Ok: false, Command: "TakeControl",
+					Message: "TAKE CONTROL requires exactly one drone"}, nil
+			}
+			id := req.DroneIds[0]
+			s.missionDispatchMu.Lock()
+			if s.missionAuthorityActiveLocked() {
+				snap := s.mission.Snapshot()
+				if snap.Mode != mission.ModeSwarmLeader {
+					s.missionDispatchMu.Unlock()
+					return &pb.CommandResult{Ok: false, Command: "TakeControl", DroneId: id,
+						Message: "active Core mission owns navigation — TAKE CONTROL is only selective for SWARM_LEADER"}, nil
+				}
+				alreadyExcluded := false
+				for _, excluded := range snap.ExcludedParticipants {
+					if excluded == id {
+						alreadyExcluded = true
+						break
+					}
+				}
+				if alreadyExcluded {
+					s.missionDispatchMu.Unlock()
+					return &pb.CommandResult{Ok: true, Command: "TakeControl", DroneId: id,
+						Message: fmt.Sprintf("Drone %d already in individual control", id)}, nil
+				}
+				if !s.applySwarmMissionTakeoversLocked([]uint32{id}) {
+					s.missionDispatchMu.Unlock()
+					return &pb.CommandResult{Ok: false, Command: "TakeControl", DroneId: id,
+						Message: fmt.Sprintf("Drone %d is not an active SWARM_LEADER participant", id)}, nil
+				}
+				s.missionDispatchMu.Unlock()
+				_ = s.persistMissionState(false)
+				return &pb.CommandResult{Ok: true, Command: "TakeControl", DroneId: id,
+					Message: fmt.Sprintf("Drone %d excluded from SWARM_LEADER for individual control", id)}, nil
+			}
+			leader, members, stopped, err := s.swarm.TakeControl(id)
+			s.missionDispatchMu.Unlock()
+			if err != nil {
+				return &pb.CommandResult{Ok: false, Command: "TakeControl", DroneId: id,
+					Message: err.Error()}, nil
+			}
+			if stopped {
+				return &pb.CommandResult{Ok: true, Command: "TakeControl", DroneId: id,
+					Message: fmt.Sprintf("Drone %d individual control; formation stopped (<2 members remain)", id)}, nil
+			}
+			return &pb.CommandResult{Ok: true, Command: "TakeControl", DroneId: id,
+				Message: fmt.Sprintf("Drone %d individual control; leader Drone %d; members=%v", id, leader, members)}, nil
+		}
+		fallthrough
+	default: // HOLD / untargeted STOP
 		s.missionDispatchMu.Lock()
 		s.swarm.RevokeReturnNavigation()
 		s.swarm.RevokeFormationNavigation()

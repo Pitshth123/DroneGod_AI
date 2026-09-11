@@ -28,6 +28,7 @@ if _FRONTEND not in sys.path:
 from PyQt5.QtWidgets import QApplication, QLabel, QFrame  # noqa: E402
 
 from swarmgod_gui.app import GroundStation  # noqa: E402
+from swarmgod_gui.core import rpc  # noqa: E402
 from swarmgod_gui.widgets.fleet_item import FleetItem  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
@@ -94,6 +95,12 @@ class FakeClient:
 
     def swarm_stop(self):
         self.calls.append(("swarm_stop",)); return _R()
+
+    def swarm_take_control(self, drone_id):
+        self.calls.append(("swarm_take_control", int(drone_id))); return _R()
+
+    def rc_move(self, ids, direction, speed, yaw_rate=30.0):
+        self.calls.append(("rc_move", tuple(ids), int(direction), float(speed))); return _R()
 
     def swarm_return(self, ids=None, base_alt=15.0, gap=5.0):
         self.calls.append(("swarm_return", tuple(ids or []), float(base_alt), float(gap)))
@@ -170,6 +177,131 @@ class Base(unittest.TestCase):
         self.win.fleet_items[did] = it
         self.win.fleet_area.addWidget(it)
         self.win._last_seen[did] = time.monotonic()
+
+
+# ─────────────────────────────────────────────────────────────
+#  INDIVIDUAL / SWARM / TAKE CONTROL — MOVE ต้องไปลำที่ผู้ใช้คาดไว้เสมอ
+#    SWARM ปิด  : เลือก D2 → MOVE/STOP ไป D2 เท่านั้น
+#    SWARM เปิด : MOVE → Leader (ลูกตาม formation) ไม่กระจายไปลูก
+#    TAKE CONTROL D2 : ถอด D2 ออกจากฝูง แล้ว MOVE ไป D2 · ลูกลำอื่นยังอยู่ในฝูง
+#  + ปล่อยปุ่ม = RC STOP (ไม่ใช่ takeover) ที่ไม่มี MOVE แซงหลัง
+# ─────────────────────────────────────────────────────────────
+class TestIndividualSwarmControl(Base):
+    STOP = rpc.command_pb2.RC_DIR_STOP
+    FWD = rpc.command_pb2.RC_DIR_FWD
+
+    def setUp(self):
+        super().setUp()
+        self.win._confirm = lambda *a, **k: True
+
+    def _swarm(self, leader=1, members=(1, 2, 3)):
+        self.win._swarm_active = True
+        self.win._leader_id = leader
+        self.win._swarm_member_ids = set(members)
+        self.win._individual_control_ids.clear()
+        self.win._refresh_control_roles()
+
+    def _moves(self):
+        return [c for c in self.fake.calls if c[0] == "rc_move"]
+
+    def _press_release(self):
+        self.win._rc_press(self.FWD)
+        _pump(0.35)
+        self.win._rc_release()
+        _pump(0.35)
+
+    def test_swarm_off_move_and_stop_go_to_selected_drone_only(self):
+        self.win._on_fleet_click(2, False)
+        self.assertEqual(self.win._rc_target(), [2])
+        self._press_release()
+        moves = self._moves()
+        self.assertTrue(moves, "กด FWD แล้วต้องมี MOVE ออกไป")
+        self.assertEqual({c[1] for c in moves}, {(2,)}, "เลือก D2 ต้องขยับ D2 เท่านั้น")
+        self.assertEqual(moves[-1][2], self.STOP, "ปล่อยปุ่มต้องจบด้วย RC STOP")
+        self.assertNotIn("stop_all", self.fake.kinds(),
+                         "ปล่อยปุ่มต้องไม่ใช่ takeover (StopAll ยุบ formation)")
+
+    def test_stop_is_never_overtaken_by_a_queued_move(self):
+        self.win._on_fleet_click(2, False)
+        self._press_release()
+        dirs = [c[2] for c in self._moves()]
+        self.assertEqual(dirs.count(self.STOP), 1)
+        self.assertEqual(dirs[-1], self.STOP, "ห้ามมี MOVE ไปถึงหลัง STOP")
+
+    def test_swarm_follower_selected_moves_leader(self):
+        self._swarm()
+        self.win._on_fleet_click(2, False)
+        self.assertEqual(self.win._control_role(2), "FOLLOWER")
+        self.assertEqual(self.win._rc_target(), [1])
+        self.assertIn("LEADER", self.win.lbl_rc_target.text())
+        self._press_release()
+        self.assertEqual({c[1] for c in self._moves()}, {(1,)})
+
+    def test_swarm_multi_select_does_not_fan_out_to_followers(self):
+        self._swarm()
+        self.win._on_fleet_toggled(True)
+        self._press_release()
+        self.assertEqual({c[1] for c in self._moves()}, {(1,)},
+                         "SWARM: velocity ใส่ลูกตรง ๆ จะแย่ง formation loop")
+
+    def test_take_control_detaches_follower_then_move_targets_it(self):
+        self._swarm()
+        self.win._take_control_drone(2)
+        _pump(0.4)
+        self.assertIn(("swarm_take_control", 2), self.fake.calls)
+        self.assertEqual(self.win._control_role(2), "INDIVIDUAL")
+        self.assertEqual(self.win._control_role(3), "FOLLOWER", "ลูกลำอื่นต้องยังอยู่ในฝูง")
+        self.assertEqual(self.win._rc_target(), [2])
+        self.assertIn("INDIVIDUAL", self.win.fleet_items[2].btn_take_control.text())
+        self.assertEqual(self.win.fleet_items[3].btn_take_control.text(), "TAKE CONTROL")
+        self.assertIn("INDIVIDUAL", self.win.lbl_rc_target.text())
+        self.fake.calls.clear()
+        self._press_release()
+        self.assertEqual({c[1] for c in self._moves()}, {(2,)})
+
+    def test_rejected_take_control_keeps_swarm_routing(self):
+        self._swarm()
+
+        class _No:
+            ok = False
+            message = "formation is still arranging"
+        self.fake.swarm_take_control = lambda did: _No()
+        self.win._take_control_drone(2)
+        _pump(0.4)
+        self.assertEqual(self.win._control_role(2), "FOLLOWER")
+        self.assertEqual(self.win._rc_target(), [1],
+                         "Core ปฏิเสธ = ลำนี้ยังเป็นลูก MOVE ต้องไป Leader")
+
+    def test_release_after_blocked_press_sends_nothing(self):
+        self.win._on_fleet_click(2, False)
+        self.win._ui_mode = False           # REMOTE → ปุ่มทิศถูกบล็อก
+        self._press_release()
+        self.assertEqual(self._moves(), [])
+        self.assertNotIn("stop_all", self.fake.kinds(),
+                         "ไม่มี MOVE ออกไป = ไม่มีอะไรต้องหยุด (ห้าม takeover เปล่า ๆ)")
+
+    def test_rejected_rc_stop_falls_back_to_stop_all(self):
+        self.win._on_fleet_click(2, False)
+        real = self.fake.rc_move
+
+        class _No:
+            ok = False
+            message = "another command is in progress for this drone"
+
+        def rc_move(ids, direction, speed, yaw_rate=30.0):
+            r = real(ids, direction, speed, yaw_rate)
+            return _No() if direction == self.STOP else r
+        self.fake.rc_move = rc_move
+        self._press_release()
+        self.assertIn(("stop_all", (2,)), self.fake.calls, "STOP ต้องชนะเสมอ")
+
+    def test_role_buttons_follow_swarm_state(self):
+        self.assertEqual(self.win.fleet_items[2].btn_take_control.text(), "ควบคุมเดี่ยว")
+        self._swarm()
+        self.assertEqual(self.win.fleet_items[2].btn_take_control.text(), "TAKE CONTROL")
+        self.win._swarm_active = False
+        self.win._refresh_control_roles()
+        self.assertEqual(self.win.fleet_items[2].btn_take_control.text(), "ควบคุมเดี่ยว")
 
 
 # ─────────────────────────────────────────────────────────────

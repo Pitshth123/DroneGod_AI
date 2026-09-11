@@ -109,6 +109,7 @@ type Manager struct {
 	missionLeaderID uint32   // non-zero while Mission exclusively owns this fixed leader
 	missionMembers  []uint32 // current in-run members in original mission order
 	missionExcluded map[uint32]bool
+	manualExcluded  map[uint32]bool // operator TAKE CONTROL; excluded until next formation START
 	formationGen    uint64 // invalidates follower targets planned before membership/rebind
 	halted          bool   // leader failsafe → formation หยุดแบบ fail-closed (ไม่ auto-resume)
 	spacing         float64
@@ -201,6 +202,10 @@ func (m *Manager) SetLeader(id uint32) error {
 		return fmt.Errorf("Drone %d ไม่ได้ออนไลน์ — ตั้งเป็นตัวแม่ไม่ได้", id)
 	}
 	m.mu.Lock()
+	if m.manualExcluded[id] {
+		m.mu.Unlock()
+		return fmt.Errorf("Drone %d อยู่ในโหมดควบคุมเดี่ยว — START formation ใหม่ก่อนตั้งเป็น Head", id)
+	}
 	m.pinnedID = id
 	m.leaderID = id
 	m.note = fmt.Sprintf("ผู้ใช้ตั้งตัวแม่ → Drone %d", id)
@@ -238,6 +243,7 @@ func (m *Manager) Start(parent context.Context) error {
 	m.missionLeaderID = 0
 	m.missionMembers = nil
 	m.missionExcluded = nil
+	m.manualExcluded = make(map[uint32]bool)
 	m.formationGen++
 	m.halted = false                  // เริ่มภารกิจใหม่ = ล้างสถานะ halt เดิม (ต้อง Start ใหม่เท่านั้น)
 	m.leaderID = m.pickLeader(online) // เคารพตัวแม่ที่ผู้ใช้ปักหมุดไว้
@@ -283,6 +289,7 @@ func (m *Manager) RevokeFormationNavigation() <-chan struct{} {
 	m.missionLeaderID = 0
 	m.missionMembers = nil
 	m.missionExcluded = nil
+	m.manualExcluded = nil
 	m.formationGen++
 	m.halted = false
 	m.note = "formation stopped"
@@ -328,6 +335,117 @@ func (m *Manager) Stop() {
 	if wait := m.RevokeFormationNavigation(); wait != nil {
 		<-wait
 	}
+}
+
+// TakeControl removes one aircraft from ordinary (non-Mission) formation ownership.
+// The m.mu write lock is the same final-write boundary used by sendFollowerIfOwned:
+// once this method returns successfully, no stale follower write for the excluded
+// aircraft can begin. Exclusion is sticky for this formation generation and is
+// cleared only by the next explicit Start().
+//
+// If removing the target would leave fewer than two formation members, the whole
+// formation is revoked fail-closed; the requested aircraft is still free for
+// individual operator control, but no one-aircraft "formation" is kept alive.
+func (m *Manager) TakeControl(id uint32) (leader uint32, members []uint32, formationStopped bool, err error) {
+	if id == 0 {
+		return 0, nil, false, fmt.Errorf("take control requires a drone id")
+	}
+
+	m.mu.Lock()
+	if m.missionLeaderID != 0 {
+		m.mu.Unlock()
+		return 0, nil, false, fmt.Errorf("mission-owned formation takeover must use Mission ownership path")
+	}
+	if !m.active || m.stopping || m.halted {
+		m.mu.Unlock()
+		return 0, nil, false, fmt.Errorf("formation is not active")
+	}
+	if !m.ready {
+		m.mu.Unlock()
+		return 0, nil, false, fmt.Errorf("formation is still arranging — wait until formation is ready or STOP the swarm")
+	}
+
+	online := m.fleet.OnlineIDs(m.cfg.LinkLostSec)
+	active := make([]uint32, 0, len(online))
+	for _, did := range online {
+		if !m.manualExcluded[did] {
+			active = append(active, did)
+		}
+	}
+	if m.manualExcluded[id] {
+		leader = m.leaderID
+		members = append([]uint32(nil), active...)
+		m.mu.Unlock()
+		return leader, members, false, nil
+	}
+	if !contains(active, id) {
+		m.mu.Unlock()
+		return 0, nil, false, fmt.Errorf("Drone %d is not an active formation member", id)
+	}
+
+	remaining := make([]uint32, 0, len(active)-1)
+	for _, did := range active {
+		if did != id {
+			remaining = append(remaining, did)
+		}
+	}
+	if len(remaining) < 2 {
+		m.mu.Unlock()
+		m.RevokeFormationNavigation()
+		note := fmt.Sprintf("TAKE CONTROL Drone %d — formation stopped (remaining members < 2)", id)
+		if m.audit != nil {
+			m.audit.Event("swarm", note)
+		}
+		if m.events != nil {
+			m.events.Publish(pb.EventLevel_EVENT_LEVEL_INFO, id, "swarm", note)
+		}
+		return 0, remaining, true, nil
+	}
+
+	if m.manualExcluded == nil {
+		m.manualExcluded = make(map[uint32]bool)
+	}
+	m.manualExcluded[id] = true
+	if m.pinnedID == id {
+		m.pinnedID = 0
+	}
+	if m.leaderID == id {
+		m.leaderID = m.pickLeader(remaining)
+	}
+	m.formationGen++ // invalidate every target planned before this exclusion/rebind
+	leader = m.leaderID
+	members = append([]uint32(nil), remaining...)
+	m.note = fmt.Sprintf("TAKE CONTROL Drone %d — individual control; leader Drone %d; formation members=%v",
+		id, leader, members)
+	note := m.note
+	m.mu.Unlock()
+
+	if m.audit != nil {
+		m.audit.Event("swarm", note)
+	}
+	if m.events != nil {
+		m.events.Publish(pb.EventLevel_EVENT_LEVEL_INFO, id, "swarm", note)
+	}
+	log.Printf("[swarm] %s", note)
+	return leader, members, false, nil
+}
+
+// FormationOwnsFollower reports whether ordinary (non-Mission) formation
+// navigation currently owns id as a follower, plus the leader it follows.
+// Manual MOVE must never race the follower loop (it re-targets every tick):
+// the operator either moves the leader (the whole swarm follows) or detaches
+// this aircraft with TAKE CONTROL first. Mission-owned formations are guarded
+// by the Mission ownership path instead.
+func (m *Manager) FormationOwnsFollower(id uint32) (owned bool, leader uint32) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if id == 0 || !m.active || m.stopping || m.halted || m.missionLeaderID != 0 {
+		return false, 0
+	}
+	if id == m.leaderID || m.manualExcluded[id] {
+		return false, m.leaderID
+	}
+	return true, m.leaderID
 }
 
 // RevokeReturnNavigation closes the return sequence's final-write guard before
@@ -636,7 +754,7 @@ func (m *Manager) sendFollowerIfOwned(generation uint64, leaderID, followerID ui
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if !m.active || !m.ready || m.stopping || m.halted || m.leaderID != leaderID ||
-		m.formationGen != generation || followerID == leaderID {
+		m.formationGen != generation || followerID == leaderID || m.manualExcluded[followerID] {
 		return false, nil
 	}
 	if m.missionLeaderID != 0 && !contains(m.missionMembers, followerID) {
@@ -694,6 +812,15 @@ func (m *Manager) tick() {
 	}
 
 	m.mu.Lock()
+	eligible := make([]uint32, 0, len(online))
+	eligibleSet := make(map[uint32]bool, len(online))
+	for _, id := range online {
+		if m.manualExcluded[id] {
+			continue
+		}
+		eligible = append(eligible, id)
+		eligibleSet[id] = true
+	}
 	// While Mission owns the fixed leader, leader reassignment is forbidden.
 	// Losing that leader halts formation fail-closed; otherwise the old leader
 	// could become a follower and receive swarm navigation over Mission authority.
@@ -703,12 +830,25 @@ func (m *Manager) tick() {
 		m.haltFormation(fmt.Sprintf("mission leader Drone %d lost — formation halted", leaderID))
 		return
 	}
-	// ── FAILOVER: ตัวแม่ยัง online ไหม? ถ้าไม่ → เลื่อนตัวถัดไป (sticky) ──
-	if !onlineSet[m.leaderID] {
+	if m.missionLeaderID == 0 && len(eligible) == 0 {
+		m.mu.Unlock()
+		m.haltFormation("no eligible formation members remain")
+		return
+	}
+	// ── FAILOVER: ตัวแม่ยังเป็นสมาชิกที่มีสิทธิ์อยู่ไหม? ถ้าไม่ → เลื่อนตัวถัดไป (sticky) ──
+	leaderAvailable := onlineSet[m.leaderID]
+	if m.missionLeaderID == 0 {
+		leaderAvailable = eligibleSet[m.leaderID]
+	}
+	if !leaderAvailable {
 		old := m.leaderID
-		// ตัวแม่หาย → ถ้าตัวที่ผู้ใช้ปักหมุดยัง online ใช้ตัวนั้น ไม่งั้นเลื่อนตัวถัดไป
-		m.leaderID = m.pickLeader(online)
-		m.note = fmt.Sprintf("leader Drone %d lost -> promoted Drone %d", old, m.leaderID)
+		candidates := online
+		if m.missionLeaderID == 0 {
+			candidates = eligible
+		}
+		// ตัวแม่หาย/ถูก TAKE CONTROL → ใช้ pinned ที่ยังมีสิทธิ์ ไม่งั้นเลื่อนตัวถัดไป
+		m.leaderID = m.pickLeader(candidates)
+		m.note = fmt.Sprintf("leader Drone %d unavailable -> promoted Drone %d", old, m.leaderID)
 		m.mu.Unlock()
 		m.audit.Event("swarm", m.note)
 		m.events.Publish(pb.EventLevel_EVENT_LEVEL_WARN, m.leaderID, "swarm", m.note)
@@ -720,7 +860,7 @@ func (m *Manager) tick() {
 	headMode := m.headingMode
 	formation := m.formation
 	generation := m.formationGen
-	managed := append([]uint32(nil), online...)
+	managed := append([]uint32(nil), eligible...)
 	if m.missionLeaderID != 0 {
 		managed = managed[:0]
 		for _, id := range m.missionMembers {
@@ -1368,7 +1508,11 @@ func (m *Manager) State() *pb.SwarmState {
 		if m.missionLeaderID != 0 {
 			members = append([]uint32(nil), m.missionMembers...)
 		} else if m.fleet != nil {
-			members = m.fleet.OnlineIDs(m.cfg.LinkLostSec)
+			for _, id := range m.fleet.OnlineIDs(m.cfg.LinkLostSec) {
+				if !m.manualExcluded[id] {
+					members = append(members, id)
+				}
+			}
 		}
 		for _, fid := range members {
 			if fid != m.leaderID {

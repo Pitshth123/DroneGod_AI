@@ -508,6 +508,19 @@ func (s *Service) Stop(ctx context.Context, id uint32) *pb.CommandResult {
 		s.audit.Command(id, "StopAll", true, "zero velocity send error: "+err.Error(), -1)
 		return res(id, "StopAll", false, -1, err.Error())
 	}
+	// Already GUIDED: the zero-velocity target above IS the stop — ArduCopter's
+	// guided velocity controller brakes and then holds the point where it
+	// actually stopped. Pinning SafetyState's lat/lon here would pin where the
+	// aircraft was one telemetry sample ago at full speed; the position
+	// controller overshoots that point while braking and then flies BACK to it
+	// ("leader springs back after MOVE is released", audit 2026-09-11 14:50:46).
+	// Only a non-GUIDED aircraft (AUTO/RTL/LOITER…) needs Hold's mode switch.
+	if st := d.SafetyState(); st.Armed && st.Mode == holdModeName && !s.mgr.FailsafeActive(id) {
+		s.audit.Command(id, "StopAll", true, "zero velocity — GUIDED brake, holds where it stops", 0)
+		r := res(id, "StopAll", true, 0, "braking — holds where it stops")
+		r.Outcome = pb.CommandOutcome_OUTCOME_SENT
+		return r
+	}
 	r := s.Hold(ctx, id)
 	if r == nil {
 		return res(id, "StopAll", false, -1, "hold returned no result")

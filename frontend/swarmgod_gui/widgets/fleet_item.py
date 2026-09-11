@@ -54,11 +54,55 @@ def servo_badge_qss(label: str) -> str:
             f" padding:1px 5px; min-width:12px;")
 
 
+def take_control_qss(color: str, radius: int, font: int, active: bool = False) -> str:
+    """ปุ่ม ควบคุมเดี่ยว / TAKE CONTROL — active = ลำนี้อยู่ในโหมด INDIVIDUAL แล้ว (พื้นทึบขึ้น)"""
+    bg = 0.26 if active else 0.10
+    return (f"QPushButton {{ background:{rgba(color, bg)}; border:1px solid {rgba(color, 0.55)};"
+            f" border-radius:{radius}px; color:{color}; font-size:{font}px; font-weight:800;"
+            f" letter-spacing:0.3px; padding:0 3px; }}"
+            f"QPushButton:hover {{ background:{rgba(color, bg + 0.10)};"
+            f" border:1px solid {rgba(color, 0.80)}; }}"
+            f"QPushButton:pressed {{ background:{rgba(color, bg + 0.20)}; }}"
+            f"QPushButton:disabled {{ color:{T('faint')}; border:1px solid {rgba('#ffffff', 0.10)}; }}")
+
+
+# บทบาทการควบคุม (GroundStation._control_role) → ปุ่มแถว FLEET: (ข้อความ, สี, active, tooltip)
+CONTROL_ROLE_ROW = {
+    "SOLO": ("ควบคุมเดี่ยว", "cyan", False,
+             "SWARM ปิด — คลิกเพื่อเลือกลำนี้\nMOVE / GUIDED / HOLD / GOTO / ALT ส่งไปที่ลำนี้เท่านั้น"),
+    "LEADER": ("TAKE CONTROL", "cyan", False,
+               "ลำนี้เป็น Leader ของ SWARM — MOVE ขยับทั้งฝูง\n"
+               "TAKE CONTROL = ถอดออกจากฝูง แล้ว Core เลื่อนลำอื่นขึ้นเป็น Leader"),
+    "FOLLOWER": ("TAKE CONTROL", "cyan", False,
+                 "ลำนี้เป็นลูกใน SWARM (ตาม {leader})\n"
+                 "TAKE CONTROL = ถอดเฉพาะลำนี้ออกจากฝูงแล้วบังคับเอง · ฝูงที่เหลือทำงานต่อ"),
+    "INDIVIDUAL": ("● INDIVIDUAL", "green", True,
+                   "ถอดออกจาก SWARM แล้ว — MOVE ส่งมาที่ลำนี้โดยตรง\n"
+                   "ไม่กลับเข้าฝูงเอง: START formation ใหม่เพื่อรวมฝูง"),
+    "OFFLINE": ("TAKE CONTROL", "cyan", False, "ไม่มีสัญญาณ — ไม่ได้อยู่ใน formation"),
+}
+
+# การ์ดล่าง: (ป้ายสถานะ, สีป้าย, ข้อความปุ่ม, active)
+CONTROL_ROLE_CARD = {
+    "SOLO": ("CONTROL · INDIVIDUAL — SWARM ปิด · คำสั่งส่งไปที่ลำนี้เท่านั้น",
+             "cyan", "ควบคุมเดี่ยว  /  TAKE CONTROL", False),
+    "LEADER": ("CONTROL · SWARM ★ LEADER — MOVE ขยับทั้งฝูง ลูกตาม formation",
+               "yellow", "ควบคุมเดี่ยว  /  TAKE CONTROL", False),
+    "FOLLOWER": ("CONTROL · SWARM FOLLOWER — ตาม {leader} · MOVE จะไปที่ Leader",
+                 "amber", "ควบคุมเดี่ยว  /  TAKE CONTROL", False),
+    "INDIVIDUAL": ("CONTROL · INDIVIDUAL — ถอดจาก SWARM แล้ว · MOVE ไปที่ลำนี้โดยตรง",
+                   "green", "●  ควบคุมเดี่ยวอยู่  /  INDIVIDUAL", True),
+    "OFFLINE": ("CONTROL · — ไม่มีสัญญาณ (ไม่ได้อยู่ใน formation)",
+                "faint", "ควบคุมเดี่ยว  /  TAKE CONTROL", False),
+}
+
+
 class FleetItem(QFrame):
     """แถวโดรน 1 ลำ — คลิกเพื่อเลือก (Ctrl+Click = เลือกหลายลำ) · กดดาวเพื่อตั้งเป็น Head"""
     clicked = pyqtSignal(int, bool)   # drone_id, ctrl_held (True = toggle เพิ่ม/เอาออก)
     head_req = pyqtSignal(int)   # ขอเซ็ตลำนี้เป็น Head (app จะถามยืนยันก่อน)
     group_req = pyqtSignal(int, int)  # drone_id, group_no (0 = ไม่มีกลุ่ม)
+    take_control_req = pyqtSignal(int)  # ถอดจาก SWARM แล้วควบคุมลำนี้แบบเดี่ยว
 
     def __init__(self, drone_id: int, name: str = "", pixmap: QPixmap = None, parent=None):
         super().__init__(parent)
@@ -73,7 +117,8 @@ class FleetItem(QFrame):
         self.setCursor(Qt.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         # ต้องตรงกับ _fleet_item_h ใน app.py (ใช้คำนวณความสูงพื้นที่เลื่อน)
-        self.setFixedHeight(64)
+        # เพิ่มพื้นที่ให้ TAKE CONTROL เห็นชัดโดยไม่เบียดชื่อ/สถานะเดิม
+        self.setFixedHeight(82)
         self._apply_style()
 
         h = QHBoxLayout(self)
@@ -156,7 +201,14 @@ class FleetItem(QFrame):
         self.lbl_bat.setStyleSheet(
             f"color:{T('dim')}; font-size:10px; font-weight:600; font-family:{FONT_MONO};")
         right.addWidget(self.lbl_bat, 0, Qt.AlignRight)
+        self.btn_take_control = QPushButton("ควบคุมเดี่ยว")
+        self.btn_take_control.setFixedSize(86, 20)
+        self.btn_take_control.setCursor(Qt.PointingHandCursor)
+        self.btn_take_control.clicked.connect(lambda: self.take_control_req.emit(self.drone_id))
+        right.addWidget(self.btn_take_control, 0, Qt.AlignRight)
         h.addLayout(right)
+        self._control_key = None
+        self.set_control_role("SOLO")
 
     def _apply_style(self):
         if self._selected:
@@ -215,6 +267,17 @@ class FleetItem(QFrame):
     def set_head(self, on: bool):
         self._is_head = bool(on)
         self._style_head_btn()
+
+    def set_control_role(self, role: str, leader_name: str = ""):
+        """ปุ่มควบคุมบอกบทบาทของลำนี้: ควบคุมเดี่ยว (SWARM ปิด) / TAKE CONTROL / ● INDIVIDUAL"""
+        key = (role, leader_name)
+        if key == self._control_key:
+            return
+        self._control_key = key
+        text, color_key, active, tip = CONTROL_ROLE_ROW.get(role, CONTROL_ROLE_ROW["SOLO"])
+        self.btn_take_control.setText(text)
+        self.btn_take_control.setToolTip(tip.format(leader=leader_name or "Leader"))
+        set_qss(self.btn_take_control, take_control_qss(T(color_key), 5, 9, active))
 
     def set_servo_state(self, labels):
         """แสดงป้าย A/B ที่ "เปิดอยู่จริง" (ว่าง/None = ไม่มีช่องไหนเปิด → ซ่อน)
@@ -326,6 +389,7 @@ class SelectedDroneCard(QFrame):
     alt_changed = pyqtSignal(int, float)      # drone_id, ความสูง takeoff ของลำนี้
     spacing_changed = pyqtSignal(int, float)  # drone_id, ระยะห่างจากลำหน้า
     rename_req = pyqtSignal(int, str)          # เปลี่ยนชื่อที่แสดง/บันทึกใน cockpit
+    take_control_req = pyqtSignal(int)          # ควบคุมเดี่ยว / selective SWARM takeover
 
     def __init__(self, pixmap: QPixmap = None, parent=None):
         super().__init__(parent)
@@ -552,6 +616,25 @@ class SelectedDroneCard(QFrame):
             f" background:{rgba('#ffffff', 0.025)}; border-radius:5px; padding:4px 6px;")
         v.addWidget(param_help)
 
+        # INDIVIDUAL / SWARM ของลำนี้ — ป้ายชัด ๆ ให้รู้ว่า MOVE จะไปลำไหนก่อนกด
+        self.lbl_control = QLabel("")
+        self.lbl_control.setWordWrap(True)
+        self.lbl_control.setVisible(False)
+        v.addWidget(self.lbl_control)
+        self.btn_take_control = QPushButton("ควบคุมเดี่ยว  /  TAKE CONTROL")
+        self.btn_take_control.setFixedHeight(32)
+        self.btn_take_control.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.btn_take_control.setCursor(Qt.PointingHandCursor)
+        self.btn_take_control.setToolTip(
+            "SWARM ปิด: เลือกควบคุมลำนี้ลำเดียว\n"
+            "SWARM เปิด: ถอด ownership ของลำนี้ออกจาก formation ก่อน แล้ว MOVE จะไปที่ลำนี้โดยตรง"
+            " · ฝูงที่เหลือทำงานต่อ · ไม่ขยับโดรนเอง")
+        set_qss(self.btn_take_control, take_control_qss(T("cyan"), 7, 10))
+        self.btn_take_control.clicked.connect(
+            lambda: self.drone_id and self.take_control_req.emit(self.drone_id))
+        v.addWidget(self.btn_take_control)
+        self._control_key = None
+
         qa = QLabel("QUICK ACTIONS")
         qa.setStyleSheet(
             f"color:{T('faint')}; font-size:10px; font-weight:600; letter-spacing:1.4px;")
@@ -766,7 +849,7 @@ class SelectedDroneCard(QFrame):
     def set_quick_enabled(self, on: bool):
         for b in (self.btn_arm, self.btn_disarm,
                   self.btn_rtl, self.btn_land, self.btn_hold,
-                  self.btn_sethead, self.btn_estop):
+                  self.btn_take_control, self.btn_sethead, self.btn_estop):
             b.setEnabled(on)
 
     def set_params(self, alt: float, spacing: float):
@@ -794,6 +877,24 @@ class SelectedDroneCard(QFrame):
         self._is_head = bool(on)
         self.lbl_head.setVisible(self._is_head)
         self.btn_sethead.setText("★ HEAD" if self._is_head else "★ SET HEAD")
+
+    def set_control_role(self, role: str, leader_name: str = ""):
+        """ป้าย CONTROL (INDIVIDUAL / SWARM LEADER / FOLLOWER) + ข้อความปุ่ม TAKE CONTROL"""
+        key = (role, leader_name)
+        if key == self._control_key:
+            return
+        self._control_key = key
+        text, color_key, btn_text, active = CONTROL_ROLE_CARD.get(role, CONTROL_ROLE_CARD["SOLO"])
+        color = T(color_key)
+        self.lbl_control.setText(text.format(leader=leader_name or "Leader"))
+        set_qss(self.lbl_control,
+                f"color:{color}; background:{rgba(color, 0.10)};"
+                f" border:1px solid {rgba(color, 0.40)}; border-radius:6px;"
+                f" padding:4px 7px; font-size:10px; font-weight:700;")
+        self.lbl_control.setVisible(True)
+        self.btn_take_control.setText(btn_text)
+        set_qss(self.btn_take_control,
+                take_control_qss(T("green") if active else T("cyan"), 7, 10, active))
 
     def set_servo_state(self, labels):
         """แสดงป้าย A/B ที่ "เปิดอยู่จริง" (ว่าง/None = ไม่มีช่องไหนเปิด → ซ่อน)

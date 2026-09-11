@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from PyQt5.QtCore import (
     Qt, QTimer, QUrl, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect, QEvent,
@@ -251,6 +252,11 @@ class GroundStation(QMainWindow):
         # เก็บในหน่วยความจำเท่านั้น: เปิดโปรแกรมใหม่ = ต้องเทสใหม่ (fail-closed)
         self._preflight = preflight.PreflightState()
         self._swarm_active = False
+        # Drone IDs that the operator explicitly detached with TAKE CONTROL while
+        # a SWARM remains active.  These IDs route manual MOVE to themselves,
+        # never back through the current leader.  A fresh SWARM start clears them.
+        self._individual_control_ids = set()
+        self._swarm_member_ids = set()
         self._flight_mode = None          # 'flight' | 'swarm' | 'rtl' (ป้ายบนแถบบน)
         self._nav_targets = {}            # drone_id -> (lat, lon) เป้าหมายที่สั่งไว้
         # ── แผนที่ 3D (สร้างตอนกดใช้ครั้งแรก ไม่กินทรัพยากรถ้าไม่ได้เปิด) ──
@@ -337,6 +343,15 @@ class GroundStation(QMainWindow):
         self._land_guided_done = set()    # ลำที่ตั้ง GUIDED หลังลงจอดไปแล้ว (กันยิงซ้ำ)
         self._rc_order = []               # คิวลำดับเคลื่อนที่กันชน (spec 7)
         self._rc_order_dir = None
+        # MOVE/STOP ของการบังคับสดวิ่งผ่าน worker "เดียว" ตามลำดับ — STOP จึงไม่มีทาง
+        # ถูก repeat MOVE ที่ค้างอยู่แซงหลัง (audit 2026-09-11 14:50:46: RcMove ถึง
+        # Core หลัง StopAll แล้วตัวแม่ขยับต่อ). ทุกการกดมี seq ของตัวเอง ปล่อยปุ่ม = seq ใหม่
+        # → repeat ที่ยังรอคิวของการกดเก่าถูกทิ้งก่อนส่ง
+        self._rc_seq = 0
+        self._rc_press_ctx = None         # {"seq","target","ids","sent_ok"} ของการกดปัจจุบัน
+        self._rc_queued = set()           # MOVE ที่รอคิวอยู่ (ต่อชุดเป้า) — ไม่ให้คิวพอกเมื่อ RPC ช้า
+        self._rc_lock = threading.Lock()
+        self._rc_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rc-serial")
         self._build_ui(core_addr)
         self._install_font_shortcuts()
         self._load_saved_ips()
@@ -917,7 +932,7 @@ class GroundStation(QMainWindow):
         # เพื่อเคลียร์พื้นที่ฝั่งซ้ายให้การ์ดโดรน — ดู _build_cfg_button()
 
         # fleet list — โชว์ครบถึง 5 ลำ เกินค่อยเลื่อน
-        self._fleet_item_h = 64
+        self._fleet_item_h = 82
         self._fleet_gap = 6
         self._fleet_visible_max = 5
 
@@ -977,6 +992,7 @@ class GroundStation(QMainWindow):
         self.sel_card.delete_req.connect(self._card_delete)
         self.sel_card.apply_ip_req.connect(self._card_apply_ip)
         self.sel_card.head_req.connect(self._on_head_req)          # spec 1
+        self.sel_card.take_control_req.connect(self._take_control_drone)
         self.sel_card.estop_req.connect(self._on_estop_drone)      # spec 4
         # Quick actions รายลำ + พารามิเตอร์รายลำ (spec 3)
         self.sel_card.arm_req.connect(self._card_arm)
@@ -2260,6 +2276,16 @@ class GroundStation(QMainWindow):
         sec = AccordionSection("MOVEMENT", accent=T("cyan"), expanded=False)
         self.sf_speed = SliderField("SPEED", 0.5, 15, 3, 0.5, "m/s", 1, T("accent"))
         sec.add_widget(self.sf_speed)
+        # บอกล่วงหน้าว่าปุ่มทิศทางจะขยับลำไหน — SWARM: Leader / INDIVIDUAL: ลำที่เลือก
+        self.lbl_rc_target = QLabel("MOVE → —")
+        self.lbl_rc_target.setWordWrap(True)
+        self.lbl_rc_target.setAlignment(Qt.AlignCenter)
+        self.lbl_rc_target.setToolTip(
+            "SWARM ปิด: MOVE ส่งไปที่ลำที่เลือกเท่านั้น\n"
+            "SWARM เปิด: MOVE ขยับ Leader แล้วลูกตาม formation\n"
+            "ต้องการบังคับลูกเอง: กด TAKE CONTROL ที่การ์ดของลำนั้นก่อน")
+        self.lbl_rc_target.setStyleSheet(self._rc_target_qss(T("faint")))
+        sec.add_widget(self.lbl_rc_target)
 
         cp = rpc.command_pb2
 
@@ -3515,7 +3541,7 @@ class GroundStation(QMainWindow):
             f" border-radius:12px; }}")
         self.toast.setVisible(True)
         self._position_toast()
-        self._toast_timer.start(3800 if kind != "info" else 2000)
+        self._toast_timer.start(10000 if kind == "err" else (3800 if kind != "info" else 2000))
 
     def _hide_toast(self):
         if hasattr(self, "toast"):
@@ -3546,7 +3572,7 @@ class GroundStation(QMainWindow):
         )
         if failed:
             detail = msg.split(":", 1)[-1].strip() if ":" in msg else msg
-            self._show_toast(f"{title} ล้มเหลว · {detail[:48]}", "err")
+            self._show_toast(f"{title} ล้มเหลว · {detail[:240]}", "err")
         elif msg.startswith("SERVO "):
             # ปุ่ม A/B โชว์ toast ตอนกดไปแล้ว ("SERVO B เปิด · 1 ลำ") ซึ่งบอกชัดกว่า
             # "SERVO B D1 สำเร็จ" — ปล่อยให้ toast เดิมค้างไว้ ไม่ทับภายในไม่กี่ ms
@@ -4406,8 +4432,94 @@ class GroundStation(QMainWindow):
         """ต่อสัญญาณของการ์ดโดรน 1 ใบ (ที่เดียว — กันลืมต่อไม่ครบ)"""
         item.clicked.connect(self._on_fleet_click)
         item.head_req.connect(self._on_head_req)
+        item.take_control_req.connect(self._take_control_drone)
         item.group_req.connect(self._set_drone_group)
         item.set_group(self.group_of.get(int(item.drone_id), 0))
+
+    def _take_control_drone(self, drone_id):
+        """Switch one aircraft to explicit individual control without moving it.
+
+        Outside SWARM this is only an unambiguous single-selection action.  While
+        SWARM is active, Core must first revoke formation/Mission ownership for
+        this aircraft; only a successful ownership transition enables direct MOVE
+        routing.  The button therefore never bypasses formation authority locally.
+        """
+        did = int(drone_id or 0)
+        if not did or did not in self.fleet_items:
+            return
+
+        # The action always makes the requested card the visible/selected target.
+        self._on_fleet_click(did, False)
+        if not bool(getattr(self, "_swarm_active", False)):
+            self._individual_control_ids.discard(did)
+            self._show_toast(f"ควบคุมเดี่ยว · Drone {did}", "ok")
+            self._log(f"INDIVIDUAL CONTROL → Drone {did} (SWARM ไม่ได้ทำงาน)",
+                      vehicle=f"Drone {did}", category="COMMAND")
+            return
+        if did in getattr(self, "_individual_control_ids", set()):
+            self._show_toast(f"Drone {did} อยู่ในโหมดควบคุมเดี่ยวแล้ว", "info")
+            return
+
+        leader = int(getattr(self, "_leader_id", 0) or 0)
+        leader_note = ("\nถ้าลำนี้เป็น Leader ระบบ Core จะเลื่อนสมาชิกที่เหลือขึ้นเป็น Leader ใหม่"
+                       if did == leader else "")
+        if not self._confirm(
+                self, "ควบคุมเดี่ยว / TAKE CONTROL",
+                f"ถอน Drone {did} ออกจาก SWARM แล้วให้ปุ่ม MOVE/ทิศทางควบคุมลำนี้โดยตรง?"
+                f"{leader_note}\n\n"
+                "คำสั่งนี้เปลี่ยน ownership เท่านั้น — จะไม่สั่งให้โดรนขยับเอง",
+                ok_text="TAKE CONTROL", accent=T("cyan"), danger=True):
+            return
+
+        self._show_toast(f"TAKE CONTROL Drone {did} · กำลังถอนจาก SWARM…", "info")
+        self._log(f"TAKE CONTROL ขอถอน Drone {did} จาก SWARM",
+                  vehicle=f"Drone {did}", category="COMMAND")
+
+        def worker():
+            try:
+                r = self._dispatch_core(
+                    "TAKE CONTROL", lambda: self.client.swarm_take_control(did),
+                    source="take-control", targets=[did], enforce_dedup=False)
+                self.ui_call.emit(lambda d=did, result=r: self._take_control_finished(d, result))
+            except Exception as e:
+                msg = format_rpc_error(e)
+                self.cmd_result.emit(f"TAKE CONTROL: ERROR {msg}")
+                self.ui_call.emit(lambda d=did, text=msg: self._show_toast(
+                    f"TAKE CONTROL D{d} ล้มเหลว · {text[:220]}", "err"))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _take_control_finished(self, drone_id, result):
+        """Commit UI routing only after Core confirms the ownership transition."""
+        did = int(drone_id or 0)
+        ok = bool(getattr(result, "ok", True))
+        message = str(getattr(result, "message", "") or "").strip()
+        if not ok:
+            self._show_toast(
+                f"TAKE CONTROL D{did} ล้มเหลว" + (f" · {message[:220]}" if message else ""),
+                "err")
+            self._log(f"TAKE CONTROL D{did} ปฏิเสธ: {message or 'unknown'}",
+                      vehicle=f"Drone {did}", category="COMMAND", severity="WARNING")
+            return
+
+        self._individual_control_ids.add(did)
+        self._swarm_member_ids.discard(did)
+        # If the operator took over the pinned/current Head, stop the Cockpit from
+        # re-pushing that excluded aircraft as leader on the next swarm poll. Core
+        # is now authoritative for successor selection.
+        if int(getattr(self, "_head_pinned", 0) or 0) == did:
+            self._head_pinned = 0
+        self._selected_ids = {did}
+        self._selected_id = did
+        self._sync_fleet_button()
+        self._select_drone(did)
+        self._refresh_selection_ui()
+        self._show_toast(f"ควบคุมเดี่ยว · Drone {did} พร้อมรับคำสั่ง", "ok")
+        self._log(
+            f"TAKE CONTROL สำเร็จ → Drone {did} เป็น INDIVIDUAL"
+            + (f" · {message}" if message else ""),
+            vehicle=f"Drone {did}", category="COMMAND")
+        self.cmd_result.emit(
+            f"TAKE CONTROL: ok=True D{did}" + (f" {message}" if message else ""))
 
     def _on_fleet_click(self, drone_id, ctrl):
         """คลิกการ์ด: ปกติ = เลือกลำเดียว, Ctrl+Click = เพิ่ม/เอาออกจากชุดที่เลือก"""
@@ -4485,6 +4597,7 @@ class GroundStation(QMainWindow):
         # โหมด SEPARATE: เปลี่ยนลำที่โฟกัส = เปลี่ยนลำที่กำลังวางแผนให้
         if getattr(self, "_wp_separate", False) and hasattr(self, "lbl_wp_points"):
             self._wp_render_points_label()
+        self._refresh_control_roles()
 
     def _selected_or_all(self):
         """ลำเป้าหมายของคำสั่ง: ที่เลือกไว้ ถ้าไม่ได้เลือกเลยคืนว่าง (ให้ผู้เรียกเตือน)"""
@@ -4579,6 +4692,11 @@ class GroundStation(QMainWindow):
         if did == self._head_id:
             self._show_toast(f"Drone {did} เป็น Head อยู่แล้ว", "info")
             return
+        if self._control_role(did) == "INDIVIDUAL":
+            # Core ปฏิเสธอยู่แล้ว (manualExcluded) — บอกตั้งแต่ต้น ไม่ให้ UI ปักหมุดค้างผิด ๆ
+            self._show_toast(f"{self._drone_name(did)} อยู่ในโหมดควบคุมเดี่ยว — "
+                             "START formation ใหม่ก่อนตั้งเป็น Head", "err")
+            return
         block = self._head_change_block_reason()
         if block:
             self._show_toast(f"เปลี่ยน Head ไม่ได้ · {block}", "err")
@@ -4637,6 +4755,7 @@ class GroundStation(QMainWindow):
                 self.cmb_leader.blockSignals(True)
                 self.cmb_leader.setCurrentIndex(idx)
                 self.cmb_leader.blockSignals(False)
+        self._refresh_control_roles()
 
     def _head_watchdog(self):
         """spec 1 — หัวหลุด (disconnect) → เลื่อนลำถัดไปที่ยัง online ขึ้นเป็นหัวอัตโนมัติ"""
@@ -6073,10 +6192,95 @@ class GroundStation(QMainWindow):
             self.coord.setText("LAT --  ·  LNG --  ·  ALT --  ·  GND SPD --")
             self.coord.setToolTip("พิกัดและสถานะของโดรนลำที่เลือก")
     def _rc_target(self):
-        if getattr(self, "_leader_id", 0):
-            return [self._leader_id]
+        """เป้าหมายของ MOVE (D-pad/แท็บเล็ต) — แยก "ลำที่เลือก" ออกจาก "ใครถือ authority"
+
+        - SWARM ปิด (INDIVIDUAL): ลำที่เลือกเท่านั้น — เลือก Drone 2 = Drone 2 ขยับ
+        - SWARM เปิด: MOVE ไปที่ Leader (ลูกตาม formation) แม้จะเลือก follower ไว้
+          เพราะ formation loop สั่งลูกซ้ำทุก 400ms — ยิงลูกตรง ๆ = แย่งกันคุม
+        - TAKE CONTROL สำเร็จ: ลำที่ถูกถอดจากฝูงเป็นเป้าตรง ส่วนฝูงที่เหลือทำงานต่อ
+        """
         ids = self._target_ids()
-        return ids[:1] if ids else [1]
+        primary = int(getattr(self, "_selected_id", 0) or 0)
+        selected = primary if primary in ids else (ids[0] if ids else primary)
+        if not bool(getattr(self, "_swarm_active", False)):
+            return [selected] if selected else [1]
+        if selected and self._control_role(selected) in ("INDIVIDUAL", "OFFLINE"):
+            return [selected]
+        leader = int(getattr(self, "_leader_id", 0) or 0)
+        if leader:
+            return [leader]
+        return [selected] if selected else [1]
+
+    def _control_role(self, drone_id):
+        """บทบาทการควบคุมของลำนี้: SOLO / LEADER / FOLLOWER / INDIVIDUAL / OFFLINE
+
+        SOLO = SWARM ปิด (ทุกลำควบคุมรายลำ) · INDIVIDUAL = ถอดออกจาก SWARM แล้ว
+        (TAKE CONTROL หรือ Core ไม่นับเป็นสมาชิก formation) ขณะฝูงที่เหลือยังทำงาน
+        """
+        did = int(drone_id or 0)
+        if not bool(getattr(self, "_swarm_active", False)):
+            return "SOLO"
+        if did in getattr(self, "_individual_control_ids", ()):
+            return "INDIVIDUAL"
+        if did and did == int(getattr(self, "_leader_id", 0) or 0):
+            return "LEADER"
+        members = getattr(self, "_swarm_member_ids", set())
+        if members and did not in members:
+            return "INDIVIDUAL" if did in self._connected_ids() else "OFFLINE"
+        return "FOLLOWER"
+
+    def _refresh_control_roles(self):
+        """วาดบทบาท SWARM / INDIVIDUAL ลงการ์ดทุกใบ + ป้าย MOVE → (idempotent, เรียกถี่ได้)"""
+        leader = int(getattr(self, "_leader_id", 0) or 0)
+        leader_name = self._drone_name(leader) if leader else ""
+        for did, item in self.fleet_items.items():
+            item.set_control_role(self._control_role(did), leader_name)
+        if hasattr(self, "sel_card") and self.sel_card.drone_id:
+            self.sel_card.set_control_role(
+                self._control_role(self.sel_card.drone_id), leader_name)
+        if hasattr(self, "lbl_rc_target"):
+            text, color = self._rc_target_caption()
+            if self.lbl_rc_target.text() != text:
+                self.lbl_rc_target.setText(text)
+                self.lbl_rc_target.setStyleSheet(self._rc_target_qss(color))
+
+    def _rc_target_caption(self):
+        """ป้าย "MOVE →" — บอกก่อนกดว่าปุ่มทิศทางจะขยับลำไหน (ไม่ต้องเดา)"""
+        if not self.fleet_items:
+            return "MOVE → —", T("faint")
+        if self._multi_move():
+            return (f"MOVE → {len(self._selected_or_all())} ลำที่เลือก · คิวกันชน"
+                    " (SWARM ปิด)"), T("cyan")
+        target = self._rc_target()[0]
+        name = self._drone_name(target)
+        role = self._control_role(target)
+        if role == "LEADER":
+            text = f"MOVE → {name} · ★ LEADER — ทั้งฝูงตาม formation"
+            sel = int(getattr(self, "_selected_id", 0) or 0)
+            if sel and sel != target and self._control_role(sel) == "FOLLOWER":
+                text += f"\n{self._drone_name(sel)} เป็นลูก · กด TAKE CONTROL เพื่อบังคับลำนี้เอง"
+            return text, T("amber")
+        if role == "INDIVIDUAL":
+            return f"MOVE → {name} · INDIVIDUAL (ถอดจาก SWARM แล้ว)", T("green")
+        return f"MOVE → {name} · ควบคุมรายลำ", T("cyan")
+
+    @staticmethod
+    def _rc_target_qss(color):
+        return (f"color:{color}; background:{rgba(color, 0.10)};"
+                f" border:1px solid {rgba(color, 0.42)}; border-radius:6px;"
+                f" padding:4px 8px; font-size:11px; font-weight:700;")
+
+    def _rc_announce_target(self, ids):
+        """SWARM: เลือก follower ไว้แต่ MOVE ไปที่ Leader — แจ้งครั้งเดียวต่อการกด"""
+        if not bool(getattr(self, "_swarm_active", False)) or len(ids) != 1:
+            return
+        sel = int(getattr(self, "_selected_id", 0) or 0)
+        target = int(ids[0])
+        if sel and sel != target and self._control_role(sel) == "FOLLOWER":
+            msg = (f"SWARM · MOVE → Leader {self._drone_name(target)} "
+                   f"({self._drone_name(sel)} เป็นลูก — กด TAKE CONTROL เพื่อบังคับลำนี้เอง)")
+            self._log(msg, vehicle=f"Drone {target}", category="COMMAND")
+            self._show_toast(msg, "info")
 
     def _safe(self, fn):
         """เรียก fn() แบบกลืน exception — **คืนค่าที่ fn คืนมาด้วย**
@@ -6237,7 +6441,13 @@ class GroundStation(QMainWindow):
             self.lbl_collide.setToolTip("ทุกลำรักษาระยะห่างปลอดภัย")
 
     def _multi_move(self):
-        """สั่งเคลื่อนที่พร้อมกันหลายลำอยู่ไหม → ต้องจัดคิวกันชน (spec 6)"""
+        """สั่งเคลื่อนที่พร้อมกันหลายลำอยู่ไหม → ต้องจัดคิวกันชน (spec 6)
+
+        SWARM เปิด = ไม่กระจาย MOVE ไปหลายลำ: Leader ขยับ ลูกตาม formation
+        (velocity ที่ยิงใส่ลูกตรง ๆ จะชนกับ formation loop ที่สั่งลูกทุก 400ms)
+        """
+        if bool(getattr(self, "_swarm_active", False)):
+            return False
         return len(self._selected_or_all()) > 1
 
     def _ordered_fleet(self, direction):
@@ -6260,6 +6470,10 @@ class GroundStation(QMainWindow):
         if self._manual_nav_blocked_by_core("MOVE"):
             return
         self._rc_dir = direction
+        if self._rc_press_ctx is None:
+            # การกดครั้งใหม่ — ล็อกเป้าหมายไว้ตลอดการกด (เปลี่ยน selection กลางคันต้องไม่ย้ายเป้า)
+            self._rc_press_ctx = self._rc_new_press()
+            self._rc_announce_target(self._rc_press_ctx["target"])
         # เลือกหลายลำ + ทิศแนวราบ → คำนวณคิวกันชน แล้ว log ให้เห็นครั้งเดียวต่อการกด
         if self._multi_move():
             dname = self._dir_name(direction)
@@ -6277,31 +6491,102 @@ class GroundStation(QMainWindow):
         self._rc_tick()
 
     def _rc_release(self):
-        self._rc_dir = None
-        self._rc_order_dir = None
         self._rc_halt(notify=False)
 
     def _rc_stop(self):
         """ปุ่ม ● STOP — แจ้ง toast"""
         self._rc_halt(notify=True)
 
-    def _rc_halt(self, notify=False):
-        self._rc_dir = None
-        ids = self._rc_target()
-        if notify:
-            self._show_toast("STOP · ส่งคำสั่ง…", "info")
+    def _rc_new_press(self):
+        self._rc_seq += 1
+        return {"seq": self._rc_seq, "target": self._rc_target(),
+                "ids": set(), "sent_ok": False}
 
-        def worker():
-            try:
-                r = self._dispatch_core(
-                    "STOP ALL [rc]", lambda: self.client.stop_all(ids),
-                    source="rc", targets=ids,
-                    enforce_dedup=False)
-                if notify:
-                    self.cmd_result.emit(f"STOP: ok={getattr(r, 'ok', True)}")
-            except Exception as e:
-                self.cmd_result.emit(f"STOP: ERROR {e}")
-        threading.Thread(target=worker, daemon=True).start()
+    def _rc_invalidate_press(self):
+        """ทิ้งสถานะการกดปัจจุบัน — repeat ที่ยังรอคิวจะถูกทิ้งก่อนส่ง (ไม่ส่ง STOP เอง)"""
+        ctx = self._rc_press_ctx
+        self._rc_press_ctx = None
+        self._rc_dir = None
+        self._rc_order_dir = None
+        self._rc_seq += 1
+        if self._rc_timer.isActive():
+            self._rc_timer.stop()
+        return ctx
+
+    def _rc_submit(self, fn, *args):
+        try:
+            self._rc_pool.submit(fn, *args)
+        except RuntimeError:
+            pass   # หน้าต่างกำลังปิด — worker ถูก shutdown แล้ว
+
+    def _rc_halt(self, notify=False):
+        """หยุดการบังคับสด — STOP ไปที่ลำเดียวกับที่ MOVE ของการกดนี้ไปถึงจริง
+
+        - ใช้ RC STOP (RC_DIR_STOP) ซึ่ง Core ไม่ถือเป็น takeover: หยุดเฉพาะลำที่ขยับ
+          ฝูง/formation ทำงานต่อ (เดิมใช้ StopAll = takeover → ปล่อยปุ่มทีไรฝูงถูกยุบทุกครั้ง
+          ลูกเลยหยุดตาม ขณะที่ตัวแม่ถูกตรึงพิกัดเก่าแล้วบินย้อนกลับ)
+        - RC STOP ถูกปฏิเสธ (busy / mission) → fallback StopAll ให้ "หยุด" ชนะเสมอ
+        - ปล่อยปุ่มหลังการกดที่ถูกบล็อก (REMOTE / Core mission) = ไม่ส่งอะไรเลย
+        - E-STOP / HOLD ALL ยังเป็น StopAll (takeover) เหมือนเดิม
+        """
+        ctx = self._rc_invalidate_press()
+        moved = sorted(ctx["ids"]) if ctx and ctx["ids"] else []
+        if notify:
+            ids = moved or list(self._rc_target())
+            self._show_toast("STOP · ส่งคำสั่ง…", "info")
+        elif moved:
+            ids = moved
+        else:
+            return
+        self._rc_submit(self._rc_stop_job, ctx, ids, notify)
+
+    def _rc_stop_job(self, ctx, ids, notify):
+        """(RC worker) STOP — วิ่งคิวเดียวกับ MOVE จึงไม่มี MOVE ของการกดนี้ไปถึงหลัง STOP"""
+        if not notify and not (ctx and ctx.get("sent_ok")):
+            return   # MOVE ของการกดนี้ไม่ถึงโดรนเลย — ไม่มีอะไรต้องหยุด และห้ามไปแตะโหมด/formation
+        stop_dir = rpc.command_pb2.RC_DIR_STOP
+        r = self._safe(lambda: self._dispatch_core(
+            "RC STOP", lambda: self.client.rc_move(ids, stop_dir, 0.0),
+            source="rc", targets=ids, enforce_dedup=False))
+        ok = r is not None and bool(getattr(r, "ok", True))
+        if not ok:
+            r = self._safe(lambda: self._dispatch_core(
+                "STOP ALL [rc-fallback]", lambda: self.client.stop_all(ids),
+                source="rc", targets=ids, enforce_dedup=False))
+            ok = r is not None and bool(getattr(r, "ok", True))
+        if notify:
+            self.cmd_result.emit(f"STOP: ok={ok}")
+
+    def _rc_submit_move(self, ctx, ids, direction, speed):
+        """ส่ง MOVE เข้าคิว RC — ไม่ซ้อนคิวถ้า repeat ก่อนหน้าของชุดเป้าเดิมยังไม่ได้ส่ง"""
+        if ctx["seq"] != self._rc_seq:
+            return
+        key = tuple(int(i) for i in ids)
+        with self._rc_lock:
+            if key in self._rc_queued:
+                return
+            self._rc_queued.add(key)
+        ctx["ids"].update(key)
+        self._rc_submit(self._rc_move_job, ctx, key, direction, speed)
+
+    def _rc_move_job(self, ctx, key, direction, speed):
+        """(RC worker) MOVE 1 ครั้ง — ทิ้งทันทีถ้าปล่อยปุ่ม/STOP ไปแล้ว"""
+        with self._rc_lock:
+            self._rc_queued.discard(key)
+        if ctx["seq"] != self._rc_seq:
+            return
+        ids = list(key)
+        r = self._safe(lambda: self._dispatch_core(
+            "RC MOVE [repeat]", lambda: self.client.rc_move(ids, direction, speed),
+            source="rc-repeat", targets=ids, enforce_dedup=False))
+        if r is None:
+            return
+        if bool(getattr(r, "ok", True)):
+            ctx["sent_ok"] = True
+        elif not ctx.get("reject_shown"):
+            ctx["reject_shown"] = True   # เตือนครั้งเดียวต่อการกด ไม่ spam ทุก 150ms
+            msg = str(getattr(r, "message", "") or "").strip()
+            self.cmd_result.emit(f"RC MOVE: ok=False {msg}".strip())
 
     def _rc_tick(self):
         if self._rc_dir is None:
@@ -6309,11 +6594,11 @@ class GroundStation(QMainWindow):
         if bool(getattr(self, "_mission_core_authority", False)):
             # A press may have started before Core authority was acquired. Stop
             # the local repeat timer/state without emitting a competing stop/move.
-            self._rc_dir = None
-            self._rc_order_dir = None
-            if self._rc_timer.isActive():
-                self._rc_timer.stop()
+            self._rc_invalidate_press()
             return
+        ctx = self._rc_press_ctx
+        if ctx is None:
+            ctx = self._rc_press_ctx = self._rc_new_press()
         spd = self.sf_speed.value()
         d = self._rc_dir
         if self._multi_move() and self._dir_name(d):
@@ -6321,17 +6606,9 @@ class GroundStation(QMainWindow):
             order = self._rc_order or self._ordered_fleet(d)
             for i, did in enumerate(order):
                 delay = i * 120  # หน่วงเล็กน้อยให้ตัวหน้าเคลียร์ทางก่อน
-                QTimer.singleShot(delay, lambda x=did: threading.Thread(
-                    target=lambda: self._safe(lambda: self._dispatch_core(
-                        "RC MOVE [repeat]", lambda: self.client.rc_move([x], d, spd),
-                        source="rc-repeat", targets=[x], enforce_dedup=False)),
-                    daemon=True).start())
+                QTimer.singleShot(delay, lambda x=did, c=ctx: self._rc_submit_move(c, [x], d, spd))
         else:
-            ids = self._rc_target()
-            threading.Thread(target=lambda: self._safe(lambda: self._dispatch_core(
-                "RC MOVE [repeat]", lambda: self.client.rc_move(ids, d, spd),
-                source="rc-repeat", targets=ids, enforce_dedup=False)),
-                             daemon=True).start()
+            self._rc_submit_move(ctx, ctx["target"], d, spd)
 
     # ══════════════════════════════════════════════════════════
     #  SWARM / EVENTS
@@ -6349,6 +6626,24 @@ class GroundStation(QMainWindow):
         import json
         was_swarm = getattr(self, "_swarm_active", False)
         self._swarm_active = bool(st.active)
+        members = set()
+        if self._swarm_active:
+            leader_now = int(getattr(st, "leader_id", 0) or 0)
+            if leader_now:
+                members.add(leader_now)
+            for edge in getattr(st, "edges", ()) or ():
+                lid = int(getattr(edge, "leader_id", 0) or 0)
+                fid = int(getattr(edge, "follower_id", 0) or 0)
+                if lid:
+                    members.add(lid)
+                if fid:
+                    members.add(fid)
+        self._swarm_member_ids = members
+        # Exclusions are scoped to one formation generation. A full STOP or a new
+        # START means Core owns a fresh membership set, so stale UI takeover marks
+        # must not leak into the next formation.
+        if not self._swarm_active or (self._swarm_active and not was_swarm):
+            self._individual_control_ids.clear()
         # เข้า/ออกโหมด Swarm → รีเฟรชการล็อก SEPARATE/WAVE ทั้ง UI + logic (spec §10)
         # (force GROUPED, ปิด WAVE, disable/enable controls, อัปเดต hint)
         if self._swarm_active != was_swarm:
@@ -6397,6 +6692,7 @@ class GroundStation(QMainWindow):
             self.lbl_swarm.setText("swarm: off")
             self.lbl_swarm.setStyleSheet(f"color:{T('faint')}; font-size:10px;")
             self._js("clearSwarmEdges()")
+        self._refresh_control_roles()
 
     def _on_event(self, ev):
         did = ev.drone_id
@@ -6762,8 +7058,7 @@ class GroundStation(QMainWindow):
         if not self._guard():
             return
         self._abort_rtl()          # ยกเลิกลำดับ RTL ที่ค้างอยู่ด้วย
-        self._rc_dir = None
-        self._rc_order_dir = None
+        self._rc_invalidate_press()   # StopAll ด้านล่างเป็นตัวหยุดเอง — ทิ้ง repeat ที่ค้างคิว
         # อยู่ในโหมด Swarm → ต้องหยุด formation loop ที่ core ด้วย
         # ไม่งั้น loop (tick ทุก 400ms) จะส่ง GotoYaw ลากตัวลูกกลับเข้ารูปขบวน
         # ทับคำสั่ง Hold ที่เพิ่งสั่งไป — ตัวลูกไม่ได้ "ลอยรอรับคำสั่ง" จริง
@@ -8634,8 +8929,7 @@ class GroundStation(QMainWindow):
         if not ids:
             return False, "ไม่มีโดรนที่เชื่อมต่ออยู่"
         self._web_move_timer.stop()
-        self._rc_dir = None
-        self._rc_order_dir = None
+        self._rc_invalidate_press()
         self._abort_rtl()
         self._abort_waypoint_execution()
         self._summ_event("หยุดทุกคำสั่ง", "HOLD ALL · %d ลำ" % len(ids), cancelled=True)
@@ -9403,6 +9697,7 @@ class GroundStation(QMainWindow):
             self.sel_card.set_head(int(drone_id) == self._head_id and self._head_id != 0)
             self.sel_card.set_servo_state(self._servo_state.get(int(drone_id)))
             self._refresh_servo_buttons()   # ปุ่ม A/B ต้องสะท้อนลำที่เพิ่งเลือก
+            self._refresh_control_roles()   # ป้าย INDIVIDUAL/SWARM + MOVE → ของลำที่เพิ่งเลือก
         # Presentation reads prefer the immutable Phase-3 store.  Raw telemetry
         # remains available separately in _last_telem for flight/business paths.
         t = self._last_telem.get(drone_id)
@@ -9684,6 +9979,12 @@ class GroundStation(QMainWindow):
                     t.stop()
                 except Exception:
                     pass
+        # RC worker: ทิ้ง MOVE ที่ค้างคิว (ไม่รอ RPC ที่กำลังวิ่ง — timeout สั้นอยู่แล้ว)
+        self._rc_seq += 1
+        try:
+            self._rc_pool.shutdown(wait=False)
+        except Exception:
+            pass
         # PingService owns a QThread which may be inside a Windows ping subprocess.
         # Join it before Qt destroys this window/its child QObjects; otherwise the
         # full suite can tear down a live QThread and crash natively (0xC0000005).
