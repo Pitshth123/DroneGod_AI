@@ -76,9 +76,12 @@ CONTROL_ROLE_ROW = {
     "FOLLOWER": ("TAKE CONTROL", "cyan", False,
                  "ลำนี้เป็นลูกใน SWARM (ตาม {leader})\n"
                  "TAKE CONTROL = ถอดเฉพาะลำนี้ออกจากฝูงแล้วบังคับเอง · ฝูงที่เหลือทำงานต่อ"),
-    "INDIVIDUAL": ("● INDIVIDUAL", "green", True,
-                   "ถอดออกจาก SWARM แล้ว — MOVE ส่งมาที่ลำนี้โดยตรง\n"
-                   "ไม่กลับเข้าฝูงเอง: START formation ใหม่เพื่อรวมฝูง"),
+    "INDIVIDUAL": ("↩ REJOIN", "green", True,
+                   "ถอดออกจาก SWARM แล้ว (INDIVIDUAL) — MOVE ส่งมาที่ลำนี้โดยตรง\n"
+                   "กด ↩ REJOIN = บินกลับเข้าช่องเดิมในขบวน (ไต่ขึ้นเหนือฝูง → ไปเหนือช่อง → ลดลง)"),
+    "REJOINING": ("⟳ REJOINING", "amber", True,
+                  "กำลังบินกลับเข้าช่องเดิมในขบวน — MOVE ใช้กับลำนี้ไม่ได้\n"
+                  "คลิก = ยกเลิกแล้วรับคุมคืน (TAKE CONTROL) · STOP ก็ยกเลิกได้"),
     "OFFLINE": ("TAKE CONTROL", "cyan", False, "ไม่มีสัญญาณ — ไม่ได้อยู่ใน formation"),
 }
 
@@ -91,7 +94,11 @@ CONTROL_ROLE_CARD = {
     "FOLLOWER": ("CONTROL · SWARM FOLLOWER — ตาม {leader} · MOVE จะไปที่ Leader",
                  "amber", "ควบคุมเดี่ยว  /  TAKE CONTROL", False),
     "INDIVIDUAL": ("CONTROL · INDIVIDUAL — ถอดจาก SWARM แล้ว · MOVE ไปที่ลำนี้โดยตรง",
-                   "green", "●  ควบคุมเดี่ยวอยู่  /  INDIVIDUAL", True),
+                   "green", "กลับเข้าขบวน  /  REJOIN", True),
+    # ปุ่มการ์ดล่างใช้ฟอนต์ที่ไม่มี ↩ / ✕ (ขึ้นเป็นกล่อง) — ใช้ข้อความล้วน
+    "REJOINING": ("CONTROL · REJOINING — กำลังกลับเข้าช่องเดิม (ไต่ขึ้น → เหนือช่อง → ลดลง)"
+                  " · MOVE ใช้กับลำนี้ไม่ได้",
+                  "amber", "ยกเลิกการกลับเข้าขบวน  /  TAKE CONTROL", True),
     "OFFLINE": ("CONTROL · — ไม่มีสัญญาณ (ไม่ได้อยู่ใน formation)",
                 "faint", "ควบคุมเดี่ยว  /  TAKE CONTROL", False),
 }
@@ -894,7 +901,7 @@ class SelectedDroneCard(QFrame):
         self.lbl_control.setVisible(True)
         self.btn_take_control.setText(btn_text)
         set_qss(self.btn_take_control,
-                take_control_qss(T("green") if active else T("cyan"), 7, 10, active))
+                take_control_qss(color if active else T("cyan"), 7, 10, active))
 
     def set_servo_state(self, labels):
         """แสดงป้าย A/B ที่ "เปิดอยู่จริง" (ว่าง/None = ไม่มีช่องไหนเปิด → ซ่อน)

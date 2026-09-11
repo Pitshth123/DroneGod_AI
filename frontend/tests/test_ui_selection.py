@@ -99,6 +99,9 @@ class FakeClient:
     def swarm_take_control(self, drone_id):
         self.calls.append(("swarm_take_control", int(drone_id))); return _R()
 
+    def swarm_rejoin(self, drone_id):
+        self.calls.append(("swarm_rejoin", int(drone_id))); return _R()
+
     def rc_move(self, ids, direction, speed, yaw_rate=30.0):
         self.calls.append(("rc_move", tuple(ids), int(direction), float(speed))); return _R()
 
@@ -199,6 +202,8 @@ class TestIndividualSwarmControl(Base):
         self.win._leader_id = leader
         self.win._swarm_member_ids = set(members)
         self.win._individual_control_ids.clear()
+        self.win._rejoining_ids.clear()
+        self.win._control_change_ts.clear()
         self.win._refresh_control_roles()
 
     def _moves(self):
@@ -252,7 +257,8 @@ class TestIndividualSwarmControl(Base):
         self.assertEqual(self.win._control_role(2), "INDIVIDUAL")
         self.assertEqual(self.win._control_role(3), "FOLLOWER", "ลูกลำอื่นต้องยังอยู่ในฝูง")
         self.assertEqual(self.win._rc_target(), [2])
-        self.assertIn("INDIVIDUAL", self.win.fleet_items[2].btn_take_control.text())
+        self.assertIn("REJOIN", self.win.fleet_items[2].btn_take_control.text(),
+                      "ลำที่ถอดแล้ว ปุ่มบนการ์ดต้องเปลี่ยนเป็น ↩ REJOIN")
         self.assertEqual(self.win.fleet_items[3].btn_take_control.text(), "TAKE CONTROL")
         self.assertIn("INDIVIDUAL", self.win.lbl_rc_target.text())
         self.fake.calls.clear()
@@ -294,6 +300,99 @@ class TestIndividualSwarmControl(Base):
         self.fake.rc_move = rc_move
         self._press_release()
         self.assertIn(("stop_all", (2,)), self.fake.calls, "STOP ต้องชนะเสมอ")
+
+    # ── ↩ REJOIN: ลำที่ถอดแล้วกลับเข้าช่องเดิมในขบวน ──
+    def _detach(self, did=2):
+        self._swarm()
+        self.win._take_control_drone(did)
+        _pump(0.4)
+        self.assertEqual(self.win._control_role(did), "INDIVIDUAL")
+
+    def _state(self, followers=(2, 3), rejoining=()):
+        class _Edge:
+            def __init__(self, leader, follower):
+                self.leader_id, self.follower_id = leader, follower
+
+        class _St:
+            active = True
+            leader_id = 1
+            formation = 0
+            spacing = 10.0
+            note = ""
+        st = _St()
+        st.edges = [_Edge(1, f) for f in followers]
+        st.rejoining_ids = list(rejoining)
+        return st
+
+    def test_rejoin_button_asks_core_and_keeps_move_on_leader(self):
+        self._detach()
+        self.win._take_control_drone(2)          # ปุ่มเดียวกัน: INDIVIDUAL → ↩ REJOIN
+        _pump(0.4)
+        self.assertIn(("swarm_rejoin", 2), self.fake.calls)
+        self.assertEqual(self.win._control_role(2), "REJOINING")
+        self.assertIn("REJOINING", self.win.fleet_items[2].btn_take_control.text())
+        self.win._on_fleet_click(2, False)
+        self.assertEqual(self.win._rc_target(), [1],
+                         "ระหว่าง REJOIN Core ถือลำนี้ — MOVE ต้องไม่ยิงใส่มัน")
+
+    def test_core_poll_settles_rejoin_into_follower(self):
+        self._detach()
+        self.win._take_control_drone(2)
+        _pump(0.4)
+        self.win._control_change_ts.clear()      # พ้นช่วงกัน poll เก่าแล้ว
+        self.win._on_swarm_update(self._state(followers=(3,), rejoining=(2,)))
+        self.assertEqual(self.win._control_role(2), "REJOINING")
+        self.win._on_swarm_update(self._state(followers=(2, 3)))
+        self.assertEqual(self.win._control_role(2), "FOLLOWER")
+        self.assertEqual(self.win.fleet_items[2].btn_take_control.text(), "TAKE CONTROL")
+
+    def test_failed_rejoin_reported_by_core_stays_individual(self):
+        self._detach()
+        self.win._take_control_drone(2)
+        _pump(0.4)
+        self.win._control_change_ts.clear()
+        self.win._on_swarm_update(self._state(followers=(3,)))   # Core ปล่อยคืน ไม่ได้เข้าช่อง
+        self.assertEqual(self.win._control_role(2), "INDIVIDUAL")
+
+    def test_stale_poll_cannot_undo_fresh_take_control(self):
+        self._detach()
+        # poll ที่ออกไปก่อน TAKE CONTROL เสร็จ ยังเห็น D2 เป็นลูก → ต้องไม่ย้อน
+        self.win._on_swarm_update(self._state(followers=(2, 3)))
+        self.assertEqual(self.win._control_role(2), "INDIVIDUAL")
+        self.assertEqual(self.win._rc_target(), [2])
+
+    def test_rejoin_refused_by_core_stays_individual(self):
+        self._detach()
+
+        class _No:
+            ok = False
+            message = "Drone 2 ต้องอยู่โหมด GUIDED ก่อนกลับเข้าขบวน"
+        self.fake.swarm_rejoin = lambda did: _No()
+        self.win._take_control_drone(2)
+        _pump(0.4)
+        self.assertEqual(self.win._control_role(2), "INDIVIDUAL")
+
+    def test_clicking_rejoining_drone_aborts_with_take_control(self):
+        self._detach()
+        self.win._take_control_drone(2)
+        _pump(0.4)
+        self.fake.calls.clear()
+        self.win._take_control_drone(2)          # ⟳ REJOINING → ยกเลิก
+        _pump(0.4)
+        self.assertIn(("swarm_take_control", 2), self.fake.calls)
+        self.assertEqual(self.win._control_role(2), "INDIVIDUAL")
+
+    def test_rejoin_blocked_while_that_drone_is_being_moved(self):
+        self._detach()
+        self.win._on_fleet_click(2, False)
+        self.win._rc_press(self.FWD)
+        _pump(0.2)
+        self.win._take_control_drone(2)
+        _pump(0.2)
+        self.win._rc_release()
+        _pump(0.3)
+        self.assertNotIn(("swarm_rejoin", 2), self.fake.calls,
+                         "ห้าม REJOIN ขณะยังกดบังคับลำนั้นอยู่")
 
     def test_role_buttons_follow_swarm_state(self):
         self.assertEqual(self.win.fleet_items[2].btn_take_control.text(), "ควบคุมเดี่ยว")

@@ -257,6 +257,8 @@ class GroundStation(QMainWindow):
         # never back through the current leader.  A fresh SWARM start clears them.
         self._individual_control_ids = set()
         self._swarm_member_ids = set()
+        self._rejoining_ids = set()       # ลำที่ Core กำลังพาบินกลับเข้าช่องในขบวน (REJOIN)
+        self._control_change_ts = {}      # did -> เวลาที่ RPC ยืนยันการเปลี่ยน ownership ล่าสุด
         self._flight_mode = None          # 'flight' | 'swarm' | 'rtl' (ป้ายบนแถบบน)
         self._nav_targets = {}            # drone_id -> (lat, lon) เป้าหมายที่สั่งไว้
         # ── แผนที่ 3D (สร้างตอนกดใช้ครั้งแรก ไม่กินทรัพยากรถ้าไม่ได้เปิด) ──
@@ -4456,19 +4458,28 @@ class GroundStation(QMainWindow):
             self._log(f"INDIVIDUAL CONTROL → Drone {did} (SWARM ไม่ได้ทำงาน)",
                       vehicle=f"Drone {did}", category="COMMAND")
             return
-        if did in getattr(self, "_individual_control_ids", set()):
-            self._show_toast(f"Drone {did} อยู่ในโหมดควบคุมเดี่ยวแล้ว", "info")
+        # ปุ่มเดียวบนการ์ด ทำตามบทบาท: ลูก/แม่ → TAKE CONTROL · ลำที่ถอดแล้ว → ↩ REJOIN
+        # · ลำที่กำลังกลับเข้าขบวน → ยกเลิก (TAKE CONTROL คืน)
+        role = self._control_role(did)
+        if role == "INDIVIDUAL":
+            self._rejoin_drone(did)
             return
-
-        leader = int(getattr(self, "_leader_id", 0) or 0)
-        leader_note = ("\nถ้าลำนี้เป็น Leader ระบบ Core จะเลื่อนสมาชิกที่เหลือขึ้นเป็น Leader ใหม่"
-                       if did == leader else "")
-        if not self._confirm(
-                self, "ควบคุมเดี่ยว / TAKE CONTROL",
-                f"ถอน Drone {did} ออกจาก SWARM แล้วให้ปุ่ม MOVE/ทิศทางควบคุมลำนี้โดยตรง?"
-                f"{leader_note}\n\n"
-                "คำสั่งนี้เปลี่ยน ownership เท่านั้น — จะไม่สั่งให้โดรนขยับเอง",
-                ok_text="TAKE CONTROL", accent=T("cyan"), danger=True):
+        if role == "REJOINING":
+            title = "ยกเลิก REJOIN / TAKE CONTROL"
+            body = (f"ยกเลิกการบินกลับเข้าขบวนของ Drone {did} แล้วรับคุมคืน?\n\n"
+                    "Core หยุดส่งเส้นทางกลับทันที — โดรนจะไปจบที่เป้าหมายช่วงล่าสุดแล้วค้าง"
+                    " สั่ง MOVE / STOP ต่อได้เลย")
+        else:
+            leader = int(getattr(self, "_leader_id", 0) or 0)
+            leader_note = ("\nถ้าลำนี้เป็น Leader ระบบ Core จะเลื่อนสมาชิกที่เหลือขึ้นเป็น Leader ใหม่"
+                           if did == leader else "")
+            title = "ควบคุมเดี่ยว / TAKE CONTROL"
+            body = (f"ถอน Drone {did} ออกจาก SWARM แล้วให้ปุ่ม MOVE/ทิศทางควบคุมลำนี้โดยตรง?"
+                    f"{leader_note}\n\n"
+                    "คำสั่งนี้เปลี่ยน ownership เท่านั้น — จะไม่สั่งให้โดรนขยับเอง"
+                    " · กลับเข้าขบวนภายหลังได้ด้วย ↩ REJOIN")
+        if not self._confirm(self, title, body,
+                             ok_text="TAKE CONTROL", accent=T("cyan"), danger=True):
             return
 
         self._show_toast(f"TAKE CONTROL Drone {did} · กำลังถอนจาก SWARM…", "info")
@@ -4502,6 +4513,8 @@ class GroundStation(QMainWindow):
             return
 
         self._individual_control_ids.add(did)
+        self._rejoining_ids.discard(did)          # TAKE CONTROL ระหว่าง REJOIN = ยกเลิกการกลับ
+        self._control_change_ts[did] = time.monotonic()
         self._swarm_member_ids.discard(did)
         # If the operator took over the pinned/current Head, stop the Cockpit from
         # re-pushing that excluded aircraft as leader on the next swarm poll. Core
@@ -4520,6 +4533,103 @@ class GroundStation(QMainWindow):
             vehicle=f"Drone {did}", category="COMMAND")
         self.cmd_result.emit(
             f"TAKE CONTROL: ok=True D{did}" + (f" {message}" if message else ""))
+
+    def _rejoin_drone(self, drone_id):
+        """↩ REJOIN — ลำที่ถูก TAKE CONTROL บินกลับเข้าช่องเดิมในขบวน
+
+        Core พาไปแบบกันชน: ไต่ขึ้นเหนือทุกลำ → บินไปเหนือช่อง → ลดลงเข้าช่อง แล้ว formation
+        loop รับคืน ระหว่างนั้น Core ถือ ownership (MOVE ลำนี้ถูกปฏิเสธ) — STOP / TAKE CONTROL
+        ยกเลิกได้เสมอ. ไม่สำเร็จ = Core เบรกค้างและลำนี้ยังเป็น INDIVIDUAL (fail-closed)
+        """
+        did = int(drone_id or 0)
+        if not did or not bool(getattr(self, "_swarm_active", False)):
+            return
+        if not self._guard():
+            return
+        press = self._rc_press_ctx
+        if press is not None and (did in press["ids"] or did in press["target"]):
+            self._show_toast("ปล่อยปุ่ม MOVE ก่อน แล้วค่อยกด REJOIN", "err")
+            return
+        name = self._drone_name(did)
+        leader = int(getattr(self, "_leader_id", 0) or 0)
+        leader_name = self._drone_name(leader) if leader else "Leader"
+        if not self._confirm(
+                self, "กลับเข้าขบวน / REJOIN",
+                f"ให้ {name} บินกลับเข้าช่องเดิมในขบวนของ {leader_name}?\n\n"
+                "เส้นทางกันชน: ไต่ขึ้นเหนือทุกลำ → บินไปเหนือช่อง → ลดลงเข้าช่อง\n"
+                "ระหว่างนี้ปุ่ม MOVE ใช้กับลำนี้ไม่ได้ · แนะนำอย่าขยับตัวแม่จนกว่าจะเสร็จ\n"
+                "ยกเลิกได้ด้วย STOP หรือ TAKE CONTROL",
+                ok_text="REJOIN", accent=T("green")):
+            return
+        self._show_toast(f"REJOIN {name} · ส่งคำสั่ง…", "info")
+        self._log(f"REJOIN ขอให้ {name} กลับเข้าขบวน", vehicle=f"Drone {did}", category="COMMAND")
+
+        def worker():
+            try:
+                r = self._dispatch_core(
+                    "SWARM REJOIN", lambda: self.client.swarm_rejoin(did),
+                    source="rejoin", targets=[did], enforce_dedup=False)
+                self.ui_call.emit(lambda d=did, result=r: self._rejoin_finished(d, result))
+            except Exception as e:
+                msg = format_rpc_error(e)
+                self.cmd_result.emit(f"SWARM REJOIN: ERROR {msg}")
+                self.ui_call.emit(lambda d=did, text=msg: self._show_toast(
+                    f"REJOIN D{d} ล้มเหลว · {text[:220]}", "err"))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _rejoin_finished(self, drone_id, result):
+        """Core รับ REJOIN แล้ว = ownership ย้ายไปที่ REJOIN run (ยังไม่ใช่ลูกจนกว่าจะเข้าช่อง)"""
+        did = int(drone_id or 0)
+        ok = bool(getattr(result, "ok", True))
+        message = str(getattr(result, "message", "") or "").strip()
+        if not ok:
+            self._show_toast(f"REJOIN D{did} ไม่ได้" + (f" · {message[:220]}" if message else ""),
+                             "err")
+            self._log(f"REJOIN D{did} ปฏิเสธ: {message or 'unknown'}", vehicle=f"Drone {did}",
+                      category="COMMAND", severity="WARNING")
+            return
+        self._individual_control_ids.discard(did)
+        self._rejoining_ids.add(did)
+        self._control_change_ts[did] = time.monotonic()
+        self._refresh_control_roles()
+        self._show_toast(f"{self._drone_name(did)} กำลังกลับเข้าขบวน", "ok")
+        self._log(f"REJOIN เริ่ม · {message or f'Drone {did}'}", vehicle=f"Drone {did}",
+                  category="COMMAND")
+
+    def _sync_control_ownership(self, st, members, fresh):
+        """ปรับ INDIVIDUAL / REJOINING ฝั่ง UI ให้ตรง Core (Core เป็นผู้ตัดสิน)
+
+        การเปลี่ยนที่ RPC เพิ่งยืนยัน (TAKE CONTROL / REJOIN) กันไว้ 3 วินาที — poll ที่ออกไป
+        ก่อน RPC เสร็จจะได้ไม่ดึงสถานะเก่ากลับมา (เช่นเพิ่ง TAKE CONTROL แล้ว MOVE ไปหาแม่)
+        """
+        if not self._swarm_active or fresh:
+            # ขบวนหยุด / START ใหม่ = Core ถือชุดสมาชิกใหม่ทั้งหมด
+            self._individual_control_ids.clear()
+            self._rejoining_ids.clear()
+            self._control_change_ts.clear()
+            return
+        now = time.monotonic()
+
+        def settled(d):
+            return now - self._control_change_ts.get(d, 0.0) > 3.0
+
+        core_rejoining = {int(i) for i in (getattr(st, "rejoining_ids", ()) or ())}
+        before = set(self._rejoining_ids)
+        self._rejoining_ids = {d for d in before if not settled(d)} | core_rejoining
+        # ลำที่ Core นับเป็นสมาชิกขบวน (หรือกำลัง REJOIN) ไม่ใช่ INDIVIDUAL อีกต่อไป
+        self._individual_control_ids = {
+            d for d in self._individual_control_ids
+            if not settled(d) or (d not in members and d not in core_rejoining)}
+        for d in sorted(before - self._rejoining_ids):
+            name = self._drone_name(d)
+            if d in members:
+                self._show_toast(f"{name} กลับเข้าขบวนแล้ว", "ok")
+                self._log(f"REJOIN สำเร็จ → {name} เป็นลูกในขบวนอีกครั้ง",
+                          vehicle=f"Drone {d}", category="COMMAND", severity="SUCCESS")
+            else:
+                self._individual_control_ids.add(d)
+                self._show_toast(f"REJOIN {name} ไม่สำเร็จ — ยังควบคุมเดี่ยว (ดูแถบแจ้งเตือน)",
+                                 "err")
 
     def _on_fleet_click(self, drone_id, ctrl):
         """คลิกการ์ด: ปกติ = เลือกลำเดียว, Ctrl+Click = เพิ่ม/เอาออกจากชุดที่เลือก"""
@@ -4692,10 +4802,10 @@ class GroundStation(QMainWindow):
         if did == self._head_id:
             self._show_toast(f"Drone {did} เป็น Head อยู่แล้ว", "info")
             return
-        if self._control_role(did) == "INDIVIDUAL":
+        if self._control_role(did) in ("INDIVIDUAL", "REJOINING"):
             # Core ปฏิเสธอยู่แล้ว (manualExcluded) — บอกตั้งแต่ต้น ไม่ให้ UI ปักหมุดค้างผิด ๆ
-            self._show_toast(f"{self._drone_name(did)} อยู่ในโหมดควบคุมเดี่ยว — "
-                             "START formation ใหม่ก่อนตั้งเป็น Head", "err")
+            self._show_toast(f"{self._drone_name(did)} ยังไม่ได้อยู่ในขบวน — "
+                             "กด ↩ REJOIN ให้กลับเข้าขบวนก่อน แล้วค่อยตั้งเป็น Head", "err")
             return
         block = self._head_change_block_reason()
         if block:
@@ -6212,14 +6322,17 @@ class GroundStation(QMainWindow):
         return [selected] if selected else [1]
 
     def _control_role(self, drone_id):
-        """บทบาทการควบคุมของลำนี้: SOLO / LEADER / FOLLOWER / INDIVIDUAL / OFFLINE
+        """บทบาทการควบคุมของลำนี้: SOLO / LEADER / FOLLOWER / INDIVIDUAL / REJOINING / OFFLINE
 
         SOLO = SWARM ปิด (ทุกลำควบคุมรายลำ) · INDIVIDUAL = ถอดออกจาก SWARM แล้ว
         (TAKE CONTROL หรือ Core ไม่นับเป็นสมาชิก formation) ขณะฝูงที่เหลือยังทำงาน
+        · REJOINING = Core กำลังพาบินกลับเข้าช่องเดิม (ถือ ownership อยู่ — MOVE ไม่ได้)
         """
         did = int(drone_id or 0)
         if not bool(getattr(self, "_swarm_active", False)):
             return "SOLO"
+        if did in getattr(self, "_rejoining_ids", ()):
+            return "REJOINING"
         if did in getattr(self, "_individual_control_ids", ()):
             return "INDIVIDUAL"
         if did and did == int(getattr(self, "_leader_id", 0) or 0):
@@ -6257,8 +6370,11 @@ class GroundStation(QMainWindow):
         if role == "LEADER":
             text = f"MOVE → {name} · ★ LEADER — ทั้งฝูงตาม formation"
             sel = int(getattr(self, "_selected_id", 0) or 0)
-            if sel and sel != target and self._control_role(sel) == "FOLLOWER":
+            sel_role = self._control_role(sel) if sel and sel != target else ""
+            if sel_role == "FOLLOWER":
                 text += f"\n{self._drone_name(sel)} เป็นลูก · กด TAKE CONTROL เพื่อบังคับลำนี้เอง"
+            elif sel_role == "REJOINING":
+                text += f"\n{self._drone_name(sel)} กำลังกลับเข้าขบวน · MOVE ใช้กับลำนี้ไม่ได้"
             return text, T("amber")
         if role == "INDIVIDUAL":
             return f"MOVE → {name} · INDIVIDUAL (ถอดจาก SWARM แล้ว)", T("green")
@@ -6642,8 +6758,7 @@ class GroundStation(QMainWindow):
         # Exclusions are scoped to one formation generation. A full STOP or a new
         # START means Core owns a fresh membership set, so stale UI takeover marks
         # must not leak into the next formation.
-        if not self._swarm_active or (self._swarm_active and not was_swarm):
-            self._individual_control_ids.clear()
+        self._sync_control_ownership(st, members, fresh=self._swarm_active and not was_swarm)
         # เข้า/ออกโหมด Swarm → รีเฟรชการล็อก SEPARATE/WAVE ทั้ง UI + logic (spec §10)
         # (force GROUPED, ปิด WAVE, disable/enable controls, อัปเดต hint)
         if self._swarm_active != was_swarm:

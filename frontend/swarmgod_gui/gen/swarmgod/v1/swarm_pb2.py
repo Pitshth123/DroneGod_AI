@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x17swarmgod/v1/swarm.proto\x12\x0bswarmgod.v1\"O\n\x0f\x46ormationOffset\x12\x13\n\x0b\x66ollower_id\x18\x01 \x01(\r\x12\r\n\x05north\x18\x02 \x01(\x01\x12\x0c\n\x04\x65\x61st\x18\x03 \x01(\x01\x12\n\n\x02up\x18\x04 \x01(\x01\"V\n\x10SetLeaderRequest\x12\x11\n\tleader_id\x18\x01 \x01(\r\x12/\n\tfollowers\x18\x02 \x03(\x0b\x32\x1c.swarmgod.v1.FormationOffset\"\xb5\x01\n\x0bSwarmConfig\x12.\n\x0cheading_mode\x18\x01 \x01(\x0e\x32\x18.swarmgod.v1.HeadingMode\x12&\n\x08yaw_mode\x18\x02 \x01(\x0e\x32\x14.swarmgod.v1.YawMode\x12\x12\n\nform_speed\x18\x03 \x01(\x01\x12\x0f\n\x07spacing\x18\x04 \x01(\x01\x12)\n\tformation\x18\x05 \x01(\x0e\x32\x16.swarmgod.v1.Formation\"\xd7\x01\n\x13SwarmControlRequest\x12\x37\n\x06\x61\x63tion\x18\x01 \x01(\x0e\x32\'.swarmgod.v1.SwarmControlRequest.Action\x12\x11\n\tdrone_ids\x18\x02 \x03(\r\x12\x17\n\x0freturn_base_alt\x18\x03 \x01(\x01\x12\x12\n\nreturn_gap\x18\x04 \x01(\x01\x12\x12\n\nrequest_id\x18\x0f \x01(\t\"3\n\x06\x41\x63tion\x12\t\n\x05START\x10\x00\x12\x08\n\x04HOLD\x10\x01\x12\x08\n\x04STOP\x10\x02\x12\n\n\x06RETURN\x10\x03\"\xae\x02\n\nSwarmState\x12+\n\x05\x65\x64ges\x18\x01 \x03(\x0b\x32\x1c.swarmgod.v1.SwarmState.Edge\x12\x0e\n\x06\x61\x63tive\x18\x02 \x01(\x08\x12.\n\x0cheading_mode\x18\x03 \x01(\x0e\x32\x18.swarmgod.v1.HeadingMode\x12&\n\x08yaw_mode\x18\x04 \x01(\x0e\x32\x14.swarmgod.v1.YawMode\x12\x11\n\tleader_id\x18\x05 \x01(\r\x12\x0c\n\x04note\x18\x06 \x01(\t\x12)\n\tformation\x18\x07 \x01(\x0e\x32\x16.swarmgod.v1.Formation\x12\x0f\n\x07spacing\x18\x08 \x01(\x01\x1a.\n\x04\x45\x64ge\x12\x11\n\tleader_id\x18\x01 \x01(\r\x12\x13\n\x0b\x66ollower_id\x18\x02 \x01(\r*B\n\x0bHeadingMode\x12\x1c\n\x18HEADING_MODE_HEAD_TO_DIR\x10\x00\x12\x15\n\x11HEADING_MODE_KEEP\x10\x01*x\n\tFormation\x12\x13\n\x0f\x46ORMATION_WEDGE\x10\x00\x12\x12\n\x0e\x46ORMATION_LINE\x10\x01\x12\x14\n\x10\x46ORMATION_COLUMN\x10\x02\x12\x15\n\x11\x46ORMATION_DIAMOND\x10\x03\x12\x15\n\x11\x46ORMATION_ECHELON\x10\x04*7\n\x07YawMode\x12\x19\n\x15YAW_MODE_MATCH_LEADER\x10\x00\x12\x11\n\rYAW_MODE_FREE\x10\x01\x42\x38Z6github.com/swarmgod/backend/gen/swarmgod/v1;swarmgodv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x17swarmgod/v1/swarm.proto\x12\x0bswarmgod.v1\"O\n\x0f\x46ormationOffset\x12\x13\n\x0b\x66ollower_id\x18\x01 \x01(\r\x12\r\n\x05north\x18\x02 \x01(\x01\x12\x0c\n\x04\x65\x61st\x18\x03 \x01(\x01\x12\n\n\x02up\x18\x04 \x01(\x01\"V\n\x10SetLeaderRequest\x12\x11\n\tleader_id\x18\x01 \x01(\r\x12/\n\tfollowers\x18\x02 \x03(\x0b\x32\x1c.swarmgod.v1.FormationOffset\"\xb5\x01\n\x0bSwarmConfig\x12.\n\x0cheading_mode\x18\x01 \x01(\x0e\x32\x18.swarmgod.v1.HeadingMode\x12&\n\x08yaw_mode\x18\x02 \x01(\x0e\x32\x14.swarmgod.v1.YawMode\x12\x12\n\nform_speed\x18\x03 \x01(\x01\x12\x0f\n\x07spacing\x18\x04 \x01(\x01\x12)\n\tformation\x18\x05 \x01(\x0e\x32\x16.swarmgod.v1.Formation\"\xe3\x01\n\x13SwarmControlRequest\x12\x37\n\x06\x61\x63tion\x18\x01 \x01(\x0e\x32\'.swarmgod.v1.SwarmControlRequest.Action\x12\x11\n\tdrone_ids\x18\x02 \x03(\r\x12\x17\n\x0freturn_base_alt\x18\x03 \x01(\x01\x12\x12\n\nreturn_gap\x18\x04 \x01(\x01\x12\x12\n\nrequest_id\x18\x0f \x01(\t\"?\n\x06\x41\x63tion\x12\t\n\x05START\x10\x00\x12\x08\n\x04HOLD\x10\x01\x12\x08\n\x04STOP\x10\x02\x12\n\n\x06RETURN\x10\x03\x12\n\n\x06REJOIN\x10\x04\"\xc5\x02\n\nSwarmState\x12+\n\x05\x65\x64ges\x18\x01 \x03(\x0b\x32\x1c.swarmgod.v1.SwarmState.Edge\x12\x0e\n\x06\x61\x63tive\x18\x02 \x01(\x08\x12.\n\x0cheading_mode\x18\x03 \x01(\x0e\x32\x18.swarmgod.v1.HeadingMode\x12&\n\x08yaw_mode\x18\x04 \x01(\x0e\x32\x14.swarmgod.v1.YawMode\x12\x11\n\tleader_id\x18\x05 \x01(\r\x12\x0c\n\x04note\x18\x06 \x01(\t\x12)\n\tformation\x18\x07 \x01(\x0e\x32\x16.swarmgod.v1.Formation\x12\x0f\n\x07spacing\x18\x08 \x01(\x01\x12\x15\n\rrejoining_ids\x18\t \x03(\r\x1a.\n\x04\x45\x64ge\x12\x11\n\tleader_id\x18\x01 \x01(\r\x12\x13\n\x0b\x66ollower_id\x18\x02 \x01(\r*B\n\x0bHeadingMode\x12\x1c\n\x18HEADING_MODE_HEAD_TO_DIR\x10\x00\x12\x15\n\x11HEADING_MODE_KEEP\x10\x01*x\n\tFormation\x12\x13\n\x0f\x46ORMATION_WEDGE\x10\x00\x12\x12\n\x0e\x46ORMATION_LINE\x10\x01\x12\x14\n\x10\x46ORMATION_COLUMN\x10\x02\x12\x15\n\x11\x46ORMATION_DIAMOND\x10\x03\x12\x15\n\x11\x46ORMATION_ECHELON\x10\x04*7\n\x07YawMode\x12\x19\n\x15YAW_MODE_MATCH_LEADER\x10\x00\x12\x11\n\rYAW_MODE_FREE\x10\x01\x42\x38Z6github.com/swarmgod/backend/gen/swarmgod/v1;swarmgodv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,12 +32,12 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'swarmgod.v1.swarm_pb2', _gl
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'Z6github.com/swarmgod/backend/gen/swarmgod/v1;swarmgodv1'
-  _globals['_HEADINGMODE']._serialized_start=916
-  _globals['_HEADINGMODE']._serialized_end=982
-  _globals['_FORMATION']._serialized_start=984
-  _globals['_FORMATION']._serialized_end=1104
-  _globals['_YAWMODE']._serialized_start=1106
-  _globals['_YAWMODE']._serialized_end=1161
+  _globals['_HEADINGMODE']._serialized_start=951
+  _globals['_HEADINGMODE']._serialized_end=1017
+  _globals['_FORMATION']._serialized_start=1019
+  _globals['_FORMATION']._serialized_end=1139
+  _globals['_YAWMODE']._serialized_start=1141
+  _globals['_YAWMODE']._serialized_end=1196
   _globals['_FORMATIONOFFSET']._serialized_start=40
   _globals['_FORMATIONOFFSET']._serialized_end=119
   _globals['_SETLEADERREQUEST']._serialized_start=121
@@ -45,11 +45,11 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_SWARMCONFIG']._serialized_start=210
   _globals['_SWARMCONFIG']._serialized_end=391
   _globals['_SWARMCONTROLREQUEST']._serialized_start=394
-  _globals['_SWARMCONTROLREQUEST']._serialized_end=609
+  _globals['_SWARMCONTROLREQUEST']._serialized_end=621
   _globals['_SWARMCONTROLREQUEST_ACTION']._serialized_start=558
-  _globals['_SWARMCONTROLREQUEST_ACTION']._serialized_end=609
-  _globals['_SWARMSTATE']._serialized_start=612
-  _globals['_SWARMSTATE']._serialized_end=914
-  _globals['_SWARMSTATE_EDGE']._serialized_start=868
-  _globals['_SWARMSTATE_EDGE']._serialized_end=914
+  _globals['_SWARMCONTROLREQUEST_ACTION']._serialized_end=621
+  _globals['_SWARMSTATE']._serialized_start=624
+  _globals['_SWARMSTATE']._serialized_end=949
+  _globals['_SWARMSTATE_EDGE']._serialized_start=903
+  _globals['_SWARMSTATE_EDGE']._serialized_end=949
 # @@protoc_insertion_point(module_scope)

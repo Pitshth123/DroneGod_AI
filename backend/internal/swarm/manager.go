@@ -109,15 +109,22 @@ type Manager struct {
 	missionLeaderID uint32   // non-zero while Mission exclusively owns this fixed leader
 	missionMembers  []uint32 // current in-run members in original mission order
 	missionExcluded map[uint32]bool
-	manualExcluded  map[uint32]bool // operator TAKE CONTROL; excluded until next formation START
-	formationGen    uint64 // invalidates follower targets planned before membership/rebind
-	halted          bool   // leader failsafe → formation หยุดแบบ fail-closed (ไม่ auto-resume)
-	spacing         float64
-	headingMode     pb.HeadingMode
-	formation       pb.Formation
-	leaderID        uint32 // ตัวแม่ปัจจุบัน (sticky)
-	pinnedID        uint32 // ตัวแม่ที่ "ผู้ใช้เลือกเอง" — ชนะ auto pick เสมอถ้ายัง online
-	note            string
+	manualExcluded  map[uint32]bool // operator TAKE CONTROL; excluded until REJOIN or next formation START
+	// slotOwners[i] = aircraft that owns follower slot i (0 = vacant). Fixed at
+	// form-up and never renumbered during a run, so TAKE CONTROL / REJOIN / link
+	// loss never re-targets another follower into the space an aircraft occupies.
+	slotOwners   []uint32
+	rejoin       map[uint32]*rejoinRun // aircraft flying back into their slot (still manualExcluded)
+	rejoinSeqN   uint64
+	formationCtx context.Context // formation lifetime (+ send guard); parent of rejoin runs
+	formationGen uint64          // invalidates follower targets planned before membership/rebind
+	halted       bool            // leader failsafe → formation หยุดแบบ fail-closed (ไม่ auto-resume)
+	spacing      float64
+	headingMode  pb.HeadingMode
+	formation    pb.Formation
+	leaderID     uint32 // ตัวแม่ปัจจุบัน (sticky)
+	pinnedID     uint32 // ตัวแม่ที่ "ผู้ใช้เลือกเอง" — ชนะ auto pick เสมอถ้ายัง online
+	note         string
 
 	cancel         context.CancelFunc
 	done           chan struct{}
@@ -204,7 +211,7 @@ func (m *Manager) SetLeader(id uint32) error {
 	m.mu.Lock()
 	if m.manualExcluded[id] {
 		m.mu.Unlock()
-		return fmt.Errorf("Drone %d อยู่ในโหมดควบคุมเดี่ยว — START formation ใหม่ก่อนตั้งเป็น Head", id)
+		return fmt.Errorf("Drone %d อยู่ในโหมดควบคุมเดี่ยว — REJOIN กลับเข้าขบวน (หรือ START ใหม่) ก่อนตั้งเป็น Head", id)
 	}
 	m.pinnedID = id
 	m.leaderID = id
@@ -244,6 +251,8 @@ func (m *Manager) Start(parent context.Context) error {
 	m.missionMembers = nil
 	m.missionExcluded = nil
 	m.manualExcluded = make(map[uint32]bool)
+	m.slotOwners = nil // form-up assigns them
+	m.rejoin = make(map[uint32]*rejoinRun)
 	m.formationGen++
 	m.halted = false                  // เริ่มภารกิจใหม่ = ล้างสถานะ halt เดิม (ต้อง Start ใหม่เท่านั้น)
 	m.leaderID = m.pickLeader(online) // เคารพตัวแม่ที่ผู้ใช้ปักหมุดไว้
@@ -252,6 +261,7 @@ func (m *Manager) Start(parent context.Context) error {
 	guard := &navigationSendGuard{}
 	ctx = fleet.WithSendGuard(ctx, guard)
 	m.cancel = cancel
+	m.formationCtx = ctx
 	m.done = make(chan struct{})
 	m.formationGuard = guard
 	done := m.done
@@ -290,6 +300,12 @@ func (m *Manager) RevokeFormationNavigation() <-chan struct{} {
 	m.missionMembers = nil
 	m.missionExcluded = nil
 	m.manualExcluded = nil
+	for _, r := range m.rejoin {
+		r.cancel() // formation ctx cancel below also covers it; keep runs from outliving ownership
+	}
+	m.rejoin = nil
+	m.slotOwners = nil
+	m.formationCtx = nil
 	m.formationGen++
 	m.halted = false
 	m.note = "formation stopped"
@@ -373,9 +389,16 @@ func (m *Manager) TakeControl(id uint32) (leader uint32, members []uint32, forma
 		}
 	}
 	if m.manualExcluded[id] {
+		// Already detached. TAKE CONTROL on an aircraft that is flying back
+		// (REJOIN) aborts that run: the operator explicitly owns it again.
+		aborted := m.abortRejoinLocked(id)
 		leader = m.leaderID
 		members = append([]uint32(nil), active...)
 		m.mu.Unlock()
+		if aborted {
+			m.publishSwarm(pb.EventLevel_EVENT_LEVEL_WARN, id, fmt.Sprintf(
+				"REJOIN Drone %d ยกเลิกด้วย TAKE CONTROL — ผู้ควบคุมรับลำนี้คืน", id))
+		}
 		return leader, members, false, nil
 	}
 	if !contains(active, id) {
@@ -441,6 +464,9 @@ func (m *Manager) FormationOwnsFollower(id uint32) (owned bool, leader uint32) {
 	defer m.mu.RUnlock()
 	if id == 0 || !m.active || m.stopping || m.halted || m.missionLeaderID != 0 {
 		return false, 0
+	}
+	if m.rejoin[id] != nil {
+		return true, m.leaderID // the REJOIN run owns it until it settles in its slot
 	}
 	if id == m.leaderID || m.manualExcluded[id] {
 		return false, m.leaderID
@@ -641,6 +667,15 @@ func (m *Manager) formUpSequential(ctx context.Context) bool {
 		fi++
 	}
 
+	// Slot ownership is fixed from here on for this run (see slotOwners).
+	owners := make([]uint32, 0, len(targets))
+	for _, t := range targets {
+		owners = append(owners, t.id)
+	}
+	m.mu.Lock()
+	m.slotOwners = owners
+	m.mu.Unlock()
+
 	// ตรึงตัวแม่ไว้ก่อนเริ่ม transition.
 	// Planning-time membership/failsafe filtering is not enough: a battery/link
 	// failsafe can latch after planning but before the MAVLink write. Compose the
@@ -779,20 +814,31 @@ func planFormationTargets(online []uint32, leaderID uint32,
 		if fid == leaderID {
 			continue
 		}
-		n, e, up := slotOffset(formation, fi, spacing)
-		if headMode == pb.HeadingMode_HEADING_MODE_HEAD_TO_DIR {
-			n, e = rotate(n, e, lHdg)
-		}
-		tLat := lLat + n/metersPerDegLat
-		tLon := lLon + e/(metersPerDegLat*math.Cos(lLat*math.Pi/180))
-		tAlt := lAlt + up
+		tLat, tLon, tAlt := slotPosition(lLat, lLon, lAlt, lHdg, spacing, formation, headMode, fi)
 		fi++
+		if fid == 0 {
+			continue // ช่องว่าง (vacant slot) — กิน index ไว้ ลำอื่นไม่เลื่อน
+		}
 		if failsafe != nil && failsafe(fid) {
-			continue // §9: Core กำลัง failsafe RTL ลำนี้ — ห้ามส่ง target ทับ
+			// §9: Core กำลัง failsafe RTL ลำนี้ / ลำที่ formation ไม่ได้ดูแล
+			// (TAKE CONTROL, REJOIN, offline) — ห้ามส่ง target ทับ แต่ช่องยังเป็นของมัน
+			continue
 		}
 		out = append(out, followerCmd{fid, tLat, tLon, tAlt, lHdg})
 	}
 	return out
+}
+
+// slotPosition = ตำแหน่งของ follower slot รอบตัวแม่ (หมุนตาม heading ถ้า HEAD_TO_DIR)
+func slotPosition(lLat, lLon, lAlt, lHdg, spacing float64,
+	formation pb.Formation, headMode pb.HeadingMode, slot int) (lat, lon, alt float64) {
+	n, e, up := slotOffset(formation, slot, spacing)
+	if headMode == pb.HeadingMode_HEADING_MODE_HEAD_TO_DIR {
+		n, e = rotate(n, e, lHdg)
+	}
+	return lLat + n/metersPerDegLat,
+		lLon + e/(metersPerDegLat*math.Cos(lLat*math.Pi/180)),
+		lAlt + up
 }
 
 func (m *Manager) tick() {
@@ -860,16 +906,28 @@ func (m *Manager) tick() {
 	headMode := m.headingMode
 	formation := m.formation
 	generation := m.formationGen
-	managed := append([]uint32(nil), eligible...)
+	// order = slot order handed to planFormationTargets. Ordinary formation uses
+	// the stable slotOwners (vacant/excluded entries keep their index); Mission
+	// keeps its immutable participant order.
+	var managed, order []uint32
 	if m.missionLeaderID != 0 {
-		managed = managed[:0]
 		for _, id := range m.missionMembers {
 			if onlineSet[id] {
 				managed = append(managed, id)
 			}
 		}
+		order = managed
+	} else {
+		managed = append([]uint32(nil), eligible...)
+		m.syncSlotsLocked(managed)
+		order = append([]uint32(nil), m.slotOwners...)
 	}
 	m.mu.Unlock()
+	managedSet := make(map[uint32]bool, len(managed))
+	for _, id := range managed {
+		managedSet[id] = true
+	}
+	skip := func(id uint32) bool { return !managedSet[id] || m.fleet.FailsafeActive(id) }
 
 	// ตัวแม่ถูก failsafe (battery/link) → Core กำลัง RTL ตัวแม่อยู่
 	// formation ทั้งขบวนต้องหยุดแบบ fail-closed ไม่ลากลูกตามตัวแม่ที่กำลังกลับฐาน (§9)
@@ -890,8 +948,8 @@ func (m *Manager) tick() {
 
 	// followers = online ทั้งหมด ยกเว้นตัวแม่ (เรียงลำดับ → slot คงที่)
 	// ลำที่ Core กำลัง failsafe RTL จะถูกตัดออกจาก planFormationTargets ตั้งแต่ต้น
-	for _, c := range planFormationTargets(managed, leaderID, lLat, lLon, lAlt, lHdg,
-		spacing, formation, headMode, m.fleet.FailsafeActive) {
+	for _, c := range planFormationTargets(order, leaderID, lLat, lLon, lAlt, lHdg,
+		spacing, formation, headMode, skip) {
 		fdrone := m.fleet.Drone(c.id)
 		if fdrone == nil {
 			continue
@@ -1520,6 +1578,7 @@ func (m *Manager) State() *pb.SwarmState {
 					LeaderId: m.leaderID, FollowerId: fid})
 			}
 		}
+		st.RejoiningIds = m.rejoiningIDsLocked()
 	}
 	return st
 }

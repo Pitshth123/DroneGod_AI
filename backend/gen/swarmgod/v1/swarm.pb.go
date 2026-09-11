@@ -169,6 +169,8 @@ func (YawMode) EnumDescriptor() ([]byte, []int) {
 	return file_swarmgod_v1_swarm_proto_rawDescGZIP(), []int{2}
 }
 
+// RETURN = กลับฐาน+ลงจอดกันชน · STOP + drone_ids[1] = TAKE CONTROL (ถอดลำนั้นจากขบวน)
+// REJOIN + drone_ids[1] = ลำที่ถูก TAKE CONTROL บินกลับเข้าช่องเดิมในขบวน (ไต่ข้าม → ลดลง)
 type SwarmControlRequest_Action int32
 
 const (
@@ -176,6 +178,7 @@ const (
 	SwarmControlRequest_HOLD   SwarmControlRequest_Action = 1
 	SwarmControlRequest_STOP   SwarmControlRequest_Action = 2
 	SwarmControlRequest_RETURN SwarmControlRequest_Action = 3
+	SwarmControlRequest_REJOIN SwarmControlRequest_Action = 4
 )
 
 // Enum value maps for SwarmControlRequest_Action.
@@ -185,12 +188,14 @@ var (
 		1: "HOLD",
 		2: "STOP",
 		3: "RETURN",
+		4: "REJOIN",
 	}
 	SwarmControlRequest_Action_value = map[string]int32{
 		"START":  0,
 		"HOLD":   1,
 		"STOP":   2,
 		"RETURN": 3,
+		"REJOIN": 4,
 	}
 )
 
@@ -500,10 +505,11 @@ type SwarmState struct {
 	Active        bool                   `protobuf:"varint,2,opt,name=active,proto3" json:"active,omitempty"`
 	HeadingMode   HeadingMode            `protobuf:"varint,3,opt,name=heading_mode,json=headingMode,proto3,enum=swarmgod.v1.HeadingMode" json:"heading_mode,omitempty"`
 	YawMode       YawMode                `protobuf:"varint,4,opt,name=yaw_mode,json=yawMode,proto3,enum=swarmgod.v1.YawMode" json:"yaw_mode,omitempty"`
-	LeaderId      uint32                 `protobuf:"varint,5,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`              // ตัวแม่ปัจจุบัน (เปลี่ยนได้จาก failover)
-	Note          string                 `protobuf:"bytes,6,opt,name=note,proto3" json:"note,omitempty"`                                       // ข้อความสถานะ (เช่น "leader UAV_1 lost -> promoted UAV_2")
-	Formation     Formation              `protobuf:"varint,7,opt,name=formation,proto3,enum=swarmgod.v1.Formation" json:"formation,omitempty"` // รูปแบบขบวนปัจจุบัน
-	Spacing       float64                `protobuf:"fixed64,8,opt,name=spacing,proto3" json:"spacing,omitempty"`                               // ระยะห่างที่ตั้งไว้ (m)
+	LeaderId      uint32                 `protobuf:"varint,5,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`                    // ตัวแม่ปัจจุบัน (เปลี่ยนได้จาก failover)
+	Note          string                 `protobuf:"bytes,6,opt,name=note,proto3" json:"note,omitempty"`                                             // ข้อความสถานะ (เช่น "leader UAV_1 lost -> promoted UAV_2")
+	Formation     Formation              `protobuf:"varint,7,opt,name=formation,proto3,enum=swarmgod.v1.Formation" json:"formation,omitempty"`       // รูปแบบขบวนปัจจุบัน
+	Spacing       float64                `protobuf:"fixed64,8,opt,name=spacing,proto3" json:"spacing,omitempty"`                                     // ระยะห่างที่ตั้งไว้ (m)
+	RejoiningIds  []uint32               `protobuf:"varint,9,rep,packed,name=rejoining_ids,json=rejoiningIds,proto3" json:"rejoining_ids,omitempty"` // ลำที่กำลังบินกลับเข้าช่องในขบวน (REJOIN)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -594,6 +600,13 @@ func (x *SwarmState) GetSpacing() float64 {
 	return 0
 }
 
+func (x *SwarmState) GetRejoiningIds() []uint32 {
+	if x != nil {
+		return x.RejoiningIds
+	}
+	return nil
+}
+
 type SwarmState_Edge struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	LeaderId      uint32                 `protobuf:"varint,1,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`
@@ -666,7 +679,7 @@ const file_swarmgod_v1_swarm_proto_rawDesc = "" +
 	"\n" +
 	"form_speed\x18\x03 \x01(\x01R\tformSpeed\x12\x18\n" +
 	"\aspacing\x18\x04 \x01(\x01R\aspacing\x124\n" +
-	"\tformation\x18\x05 \x01(\x0e2\x16.swarmgod.v1.FormationR\tformation\"\x8e\x02\n" +
+	"\tformation\x18\x05 \x01(\x0e2\x16.swarmgod.v1.FormationR\tformation\"\x9a\x02\n" +
 	"\x13SwarmControlRequest\x12?\n" +
 	"\x06action\x18\x01 \x01(\x0e2'.swarmgod.v1.SwarmControlRequest.ActionR\x06action\x12\x1b\n" +
 	"\tdrone_ids\x18\x02 \x03(\rR\bdroneIds\x12&\n" +
@@ -674,13 +687,15 @@ const file_swarmgod_v1_swarm_proto_rawDesc = "" +
 	"\n" +
 	"return_gap\x18\x04 \x01(\x01R\treturnGap\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x0f \x01(\tR\trequestId\"3\n" +
+	"request_id\x18\x0f \x01(\tR\trequestId\"?\n" +
 	"\x06Action\x12\t\n" +
 	"\x05START\x10\x00\x12\b\n" +
 	"\x04HOLD\x10\x01\x12\b\n" +
 	"\x04STOP\x10\x02\x12\n" +
 	"\n" +
-	"\x06RETURN\x10\x03\"\x8d\x03\n" +
+	"\x06RETURN\x10\x03\x12\n" +
+	"\n" +
+	"\x06REJOIN\x10\x04\"\xb2\x03\n" +
 	"\n" +
 	"SwarmState\x122\n" +
 	"\x05edges\x18\x01 \x03(\v2\x1c.swarmgod.v1.SwarmState.EdgeR\x05edges\x12\x16\n" +
@@ -690,7 +705,8 @@ const file_swarmgod_v1_swarm_proto_rawDesc = "" +
 	"\tleader_id\x18\x05 \x01(\rR\bleaderId\x12\x12\n" +
 	"\x04note\x18\x06 \x01(\tR\x04note\x124\n" +
 	"\tformation\x18\a \x01(\x0e2\x16.swarmgod.v1.FormationR\tformation\x12\x18\n" +
-	"\aspacing\x18\b \x01(\x01R\aspacing\x1aD\n" +
+	"\aspacing\x18\b \x01(\x01R\aspacing\x12#\n" +
+	"\rrejoining_ids\x18\t \x03(\rR\frejoiningIds\x1aD\n" +
 	"\x04Edge\x12\x1b\n" +
 	"\tleader_id\x18\x01 \x01(\rR\bleaderId\x12\x1f\n" +
 	"\vfollower_id\x18\x02 \x01(\rR\n" +

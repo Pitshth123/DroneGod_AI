@@ -449,6 +449,13 @@ func (s *Server) stopSwarmForTargetsLocked(ids []uint32) bool {
 	if s == nil || len(ids) == 0 {
 		return false
 	}
+	if s.swarm != nil {
+		// A takeover on an aircraft flying back (REJOIN) aborts that run first —
+		// it is not a formation member yet, so the ownership check below misses it.
+		for _, id := range ids {
+			s.swarm.AbortRejoin(id)
+		}
+	}
 	if s.applySwarmMissionTakeoversLocked(ids) {
 		return true
 	}
@@ -942,6 +949,9 @@ func (s *Server) RcMove(ctx context.Context, req *pb.RcMoveRequest) (*pb.Command
 	ids := targetIDs(req.Target)
 	return s.runNormalBatch(ctx, "RcMove", "", ids,
 		func(c context.Context, id uint32) *pb.CommandResult {
+			if req.Dir == pb.RcDirection_RC_DIR_STOP && s.swarm != nil {
+				s.swarm.AbortRejoin(id) // STOP always wins over a REJOIN in flight
+			}
 			if rejected := s.formationFollowerMoveReject(id, req.Dir); rejected != nil {
 				return rejected
 			}
@@ -955,6 +965,14 @@ func (s *Server) RcMove(ctx context.Context, req *pb.RcMoveRequest) (*pb.Command
 func (s *Server) formationFollowerMoveReject(id uint32, dir pb.RcDirection) *pb.CommandResult {
 	if s.swarm == nil || dir == pb.RcDirection_RC_DIR_STOP {
 		return nil
+	}
+	if s.swarm.RejoinInProgress(id) {
+		return &pb.CommandResult{
+			Ok: false, Command: "RcMove", DroneId: id,
+			Outcome: pb.CommandOutcome_OUTCOME_SAFETY_REJECTED,
+			Message: fmt.Sprintf("Drone %d กำลังกลับเข้าขบวน (REJOIN) — รอให้เสร็จ "+
+				"หรือกด STOP / TAKE CONTROL เพื่อยกเลิก", id),
+		}
 	}
 	owned, leader := s.swarm.FormationOwnsFollower(id)
 	if !owned {
@@ -1108,6 +1126,34 @@ func (s *Server) SwarmControl(ctx context.Context, req *pb.SwarmControlRequest) 
 			}
 			return &pb.CommandResult{Ok: true, Command: "SwarmReturn",
 				Message: "กลับฐาน+ลงจอดกันชน...", RequestId: req.RequestId}
+		}), nil
+	case pb.SwarmControlRequest_REJOIN:
+		// REJOIN flies one TAKE CONTROL aircraft back into its reserved slot (climb
+		// over → cross → descend), then the follower loop owns it again.
+		if len(req.DroneIds) != 1 || req.DroneIds[0] == 0 {
+			return &pb.CommandResult{Ok: false, Command: "SwarmRejoin",
+				Message: "REJOIN requires exactly one drone"}, nil
+		}
+		id := req.DroneIds[0]
+		s.missionDispatchMu.Lock()
+		defer s.missionDispatchMu.Unlock()
+		if rejected := s.swarmNavigationReservationRejectLocked(
+			"SwarmRejoin", req.RequestId, req.DroneIds, false); rejected != nil {
+			return rejected, nil
+		}
+		if s.missionAuthorityActiveLocked() {
+			return &pb.CommandResult{Ok: false, Command: "SwarmRejoin", DroneId: id,
+				Message: "active Core mission owns navigation — cancel mission first"}, nil
+		}
+		return s.cmd.Idempotent(req.RequestId, id, func() *pb.CommandResult {
+			slot, err := s.swarm.Rejoin(id)
+			if err != nil {
+				return &pb.CommandResult{Ok: false, Command: "SwarmRejoin", DroneId: id,
+					Message: err.Error()}
+			}
+			return &pb.CommandResult{Ok: true, Command: "SwarmRejoin", DroneId: id,
+				RequestId: req.RequestId,
+				Message:   fmt.Sprintf("Drone %d กำลังกลับเข้าขบวน → ช่อง %d", id, slot+1)}
 		}), nil
 	case pb.SwarmControlRequest_STOP:
 		// Targeted STOP is the explicit TAKE CONTROL transition used by the Cockpit.

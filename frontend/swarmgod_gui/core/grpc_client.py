@@ -273,6 +273,16 @@ class CoreClient:
         """
         return self.swarm_stop([int(drone_id)])
 
+    def swarm_rejoin(self, drone_id):
+        """Fly one TAKE CONTROL aircraft back into its reserved formation slot.
+
+        Core climbs it above the swarm, crosses to above the slot, then descends;
+        the follower loop owns it again once it has settled (fail-closed).
+        """
+        return self.stub.SwarmControl(swarm_pb2.SwarmControlRequest(
+            action=swarm_pb2.SwarmControlRequest.REJOIN,
+            drone_ids=[int(drone_id)], request_id=self._rid()), timeout=15)
+
     def swarm_return(self, ids=None, base_alt=15.0, gap=5.0):
         return self.stub.SwarmControl(swarm_pb2.SwarmControlRequest(
             action=swarm_pb2.SwarmControlRequest.RETURN,

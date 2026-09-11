@@ -48,7 +48,9 @@ message SwarmConfig {
 }
 
 message SwarmControlRequest {
-  enum Action { START = 0; HOLD = 1; STOP = 2; RETURN = 3; }  // RETURN = กลับฐาน+ลงจอดกันชน
+  // RETURN = กลับฐาน+ลงจอดกันชน · STOP + drone_ids[1] = TAKE CONTROL (ถอดลำนั้นจากขบวน)
+  // REJOIN + drone_ids[1] = ลำที่ถูก TAKE CONTROL บินกลับเข้าช่องเดิมในขบวน (ไต่ข้าม → ลดลง)
+  enum Action { START = 0; HOLD = 1; STOP = 2; RETURN = 3; REJOIN = 4; }
   Action action = 1;
   repeated uint32 drone_ids = 2; // RETURN: ว่าง = ทุกลำ online
   double return_base_alt = 3;    // core clamp >= 15m
@@ -67,4 +69,5 @@ message SwarmState {
   string        note         = 6;  // ข้อความสถานะ (เช่น "leader UAV_1 lost -> promoted UAV_2")
   Formation     formation    = 7;  // รูปแบบขบวนปัจจุบัน
   double        spacing      = 8;  // ระยะห่างที่ตั้งไว้ (m)
+  repeated uint32 rejoining_ids = 9;  // ลำที่กำลังบินกลับเข้าช่องในขบวน (REJOIN)
 }

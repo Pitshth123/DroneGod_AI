@@ -129,7 +129,7 @@ class SystemWideGatewayCoverage(unittest.TestCase):
         "set_mode", "goto", "rc_move", "stop_all", "change_alt",
         "servo_set", "servo_release", "servo_reset",
         "swarm_start", "swarm_stop", "swarm_return", "swarm_config",
-        "swarm_take_control",
+        "swarm_take_control", "swarm_rejoin",
         "set_leader", "set_geofence", "param_set",
         "start_mission", "cancel_mission",
     }
